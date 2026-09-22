@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkaipos_sdk_docs_site||=[]).push([[7089],{7089(e,s,c){c.d(s,{createArchitectureServices:()=>i.S});var i=c(5796);c(4954)}}]);
