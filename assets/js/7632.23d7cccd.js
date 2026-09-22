@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkaipos_sdk_docs_site||=[]).push([[7632],{7632(s,e,a){a.d(e,{createWardleyServices:()=>c.J});var c=a(9427);a(4954)}}]);
