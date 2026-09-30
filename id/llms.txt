@@ -1,0 +1,40 @@
+# AI POS SDK
+
+> Kotlin Multiplatform SDK for point-of-sale apps on Android and iOS: cart, card payment on a MineSec terminal, online payment (VA/QRIS), AI product suggestions, and a cashier agent.
+
+## Guide
+
+- [Pengenalan](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/introduction.md): AI POS SDK adalah pustaka Kotlin Multiplatform yang menambahkan kemampuan kasir pintar ke aplikasi point-of-sale milik Anda.
+- [Memilih artifact](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/choosing-artifacts.md): SDK dipecah per fitur.
+- [Instalasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation.md): AI POS SDK dipublikasikan di Maven dengan koordinat com.weekendinc.aipos:<artifact>:0.1.1.
+- [Mulai cepat](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/quick-start.md): Panduan ini membawa Anda dari proyek Android kosong sampai transaksi pertama berhasil — tanpa terminal, tanpa lisensi, dan tanpa backend.
+- [Konfigurasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/configuration.md): Semua konfigurasi diberikan lewat builder saat SDK dirakit.
+- [Memakai AI agent](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/ai-agents.md): Dokumentasi ini juga tersedia dalam format yang bisa dibaca langsung oleh asisten coding AI seperti Claude Code, Cursor, Codex, atau ChatGPT.
+- [Integrasi Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/android.md): Halaman ini merangkum semua yang khusus Android: siklus hidup, terminal pembayaran, lisensi MineSec, dan praktik terbaik dengan Jetpack Compose.
+- [Integrasi iOS](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/ios.md): Di iOS, semua fitur berjalan kecuali pembayaran kartu contactless.
+- [Integrasi React Native](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/react-native.md): AI POS SDK adalah pustaka Kotlin, jadi aplikasi React Native mengaksesnya lewat Native Module.
+- [Katalog produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog.md): SDK tidak membawa data produk.
+- [Keranjang](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/cart.md): Fungsi keranjang tersedia di AIPosSDK, PaymentClient, dan OnlinePaymentClient (sejak 0.1.1) dengan nama fungsi yang sama.
+- [Penyaran produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/advisor.md): Penyaran produk menyimak percakapan antara sales dan pelanggan, lalu mengusulkan barang dari katalog Anda beserta alasannya.
+- [Agent kasir](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/agent.md): Agent kasir menerima perintah dalam bahasa sehari-hari dan menjalankan transaksi sendiri: mencari produk, mengelola keranjang, memproses pembayaran, dan…
+- [Pembayaran kartu](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/card-payment.md): Pembayaran kartu mengubah ponsel Android ber-NFC menjadi terminal tap-to-pay lewat MineSec Headless SDK.
+- [Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment.md): Pembayaran online menagih isi keranjang lewat halaman pembayaran yang dibuka di WebView.
+- [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/speech-to-text.md): SDK sengaja tidak membawa mesin pengenal suara.
+- [Proxy LLM](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/llm-proxy.md): Kunci API yang dibundel ke aplikasi bisa dibongkar dari APK atau IPA.
+- [Siap produksi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist.md): Periksa daftar ini sebelum aplikasi dipasang di perangkat kasir.
+- [Pemecahan masalah](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/help/troubleshooting.md): Repository MineSec belum terdaftar atau kredensialnya salah.
+- [FAQ](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/help/faq.md): Tidak.
+- [Catatan rilis](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/help/changelog.md): Semua artifact com.weekendinc.aipos: dirilis bersamaan pada satu nomor versi.
+
+## API Reference
+
+- [Referensi API](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference.md): Referensi seluruh API publik AI POS SDK versi 0.1.1.
+- [AIPosSDK](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-sdk.md): Titik masuk tunggal untuk semua fitur.
+- [AdvisorClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/advisor-client.md): Penyaran produk tanpa fitur lain.
+- [PaymentClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/payment-client.md): Keranjang dan pembayaran kartu tanpa fitur AI.
+- [OnlinePaymentClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-client.md): Keranjang dan pembayaran online tanpa terminal dan tanpa fitur AI.
+- [OnlinePaymentConfig](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-config.md): Paket: com.weekendinc.aipos.payment.online.
+- [AiPosAndroid](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-android.md): Titik integrasi khusus Android untuk terminal pembayaran.
+- [Model data](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/models.md): Semua model adalah data class atau sealed class yang immutable.
+- [Hasil & error](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/results-and-errors.md): Paket com.weekendinc.aipos.domain.common.
+- [Jembatan Swift](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/swift-bridge.md): Sebagian API Kotlin tidak terbawa utuh ke Swift.

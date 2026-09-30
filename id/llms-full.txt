@@ -1,0 +1,3842 @@
+# AI POS SDK
+
+> Kotlin Multiplatform SDK for point-of-sale apps on Android and iOS: cart, card payment on a MineSec terminal, online payment (VA/QRIS), AI product suggestions, and a cashier agent.
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/introduction.md -->
+
+# Pengenalan
+
+AI POS SDK adalah pustaka Kotlin Multiplatform yang menambahkan kemampuan kasir pintar ke
+aplikasi point-of-sale milik Anda. SDK ini **tidak membawa tampilan apa pun** — seluruh
+layar, tombol, dan desain tetap milik aplikasi Anda. SDK menyediakan logika, data, dan
+alur transaksinya.
+
+## Apa yang bisa dilakukan
+
+| Kemampuan | Contoh | Halaman |
+|---|---|---|
+| **Penyaran produk** | Pelanggan berkata *"saya cari hp buat foto-foto, budget 15 juta"* → SDK menyarankan iPhone 15 dan Pixel 8 beserta alasannya | [Penyaran produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/advisor) |
+| **Agent kasir** | Kasir mengetik *"cari MacBook Air, tambah 1, bayar"* → agent menjalankan semuanya | [Agent kasir](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/agent) |
+| **Keranjang** | Tambah, ubah jumlah, hapus, dengan validasi stok | [Keranjang](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/cart) |
+| **Pembayaran kartu** | Pelanggan menempelkan kartu ke ponsel Android | [Pembayaran kartu](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/card-payment) |
+| **Pembayaran online** | Pelanggan membayar lewat VA, QRIS, atau kartu di halaman pembayaran | [Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment) |
+
+## Cara kerjanya
+
+```mermaid
+flowchart LR
+    subgraph APP["Aplikasi Anda"]
+        UI["Tampilan<br/>(Compose / SwiftUI)"]
+        STT["Speech-to-text"]
+        DATA["Data produk"]
+    end
+
+    subgraph SDK["AI POS SDK"]
+        ADV["Penyaran produk"]
+        AGENT["Agent kasir"]
+        CART["Keranjang"]
+        PAY["Pembayaran"]
+    end
+
+    STT -- "pushTranscript()" --> ADV
+    DATA -- "ProductCatalogSource" --> SDK
+    UI -- "sendMessage() / addToCart()" --> SDK
+    SDK -- "Flow: saran, keranjang, status" --> UI
+    PAY --> TERM["Terminal MineSec"]
+    PAY --> WEB["Halaman pembayaran<br/>online"]
+    ADV --> LLM["Model bahasa<br/>(OpenAI / proxy)"]
+    AGENT --> LLM
+```
+
+Tiga prinsip yang perlu dipahami sejak awal:
+
+1. **Data produk milik Anda.** SDK tidak punya katalog sendiri. Anda menyerahkan daftar
+   produk lewat [`ProductCatalogSource`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog), dan SDK hanya membacanya.
+2. **Mikrofon milik Anda.** Untuk penyaran produk, aplikasi Anda yang merekam dan
+   mengubah suara jadi teks, lalu menyetorkan teksnya ke SDK.
+   Lihat [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/speech-to-text).
+3. **Semua state berupa stream.** Keranjang, saran, dan status pembayaran dipancarkan
+   sebagai Kotlin `Flow`, sehingga layar Anda cukup mengamati dan menggambar ulang.
+
+## Dukungan platform
+
+| Fitur | Android | iOS |
+|---|:---:|:---:|
+| Penyaran produk | ✅ | ✅ |
+| Agent kasir | ✅ | ✅ |
+| Keranjang & riwayat transaksi | ✅ | ✅ |
+| Pembayaran kartu contactless | ✅ | ❌ |
+| Pembayaran online (WebView) | ✅ | ✅ |
+
+:::info[Kenapa iOS belum bisa menerima kartu]
+CoreNFC di iPhone hanya bisa membaca tag, bukan bertindak sebagai terminal EMV. Tap to Pay
+on iPhone memerlukan framework `ProximityReader` beserta entitlement khusus dari Apple.
+Di iOS, `processPayment()` langsung memancarkan `PaymentState.Failed` dengan penjelasan
+tersebut. Gunakan [pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment) sebagai gantinya.
+:::
+
+## Persyaratan
+
+| Kebutuhan | Versi |
+|---|---|
+| Android `minSdk` | 26 (Android 8.0) |
+| Android `compileSdk` | 36 |
+| JDK untuk build | 17 |
+| Kotlin (proyek Kotlin Multiplatform) | 2.3.21 atau lebih baru |
+| iOS | Target `iosArm64`, `iosSimulatorArm64`, `iosX64` |
+| Kunci model bahasa | OpenAI API key atau endpoint proxy yang kompatibel OpenAI — hanya untuk fitur AI |
+| Kredensial MineSec | Hanya untuk pembayaran kartu sungguhan |
+
+## Langkah berikutnya
+
+- [Memilih artifact](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/choosing-artifacts) — tentukan modul yang Anda perlukan.
+- [Instalasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation) — tambahkan SDK ke proyek Gradle.
+- [Mulai cepat](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/quick-start) — transaksi pertama dalam sepuluh menit, tanpa perangkat keras.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/choosing-artifacts.md -->
+
+# Memilih artifact
+
+SDK dipecah per fitur. Setiap artifact membawa dependensi dan izin yang berbeda, jadi
+pasang hanya yang benar-benar dipakai aplikasi Anda.
+
+Semua artifact memakai group `com.weekendinc.aipos` dan dirilis pada **satu versi yang
+sama** (`0.1.1`). Jangan mencampur versi antar-artifact.
+
+## Daftar artifact
+
+| Artifact | Isi | Titik masuk |
+|---|---|---|
+| `aipos-sdk` | Semua fitur dalam satu paket | [`AIPosSDK`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-sdk) |
+| `aipos-advisor` | Penyaran produk dari percakapan | [`AdvisorClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/advisor-client) |
+| `aipos-payment` | Keranjang + pembayaran kartu di terminal | [`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/payment-client) |
+| `aipos-payment-online` | Pembayaran online di WebView | [`OnlinePaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-client) |
+| `aipos-agent` | Agent kasir | — (dipakai lewat `aipos-sdk`) |
+| `aipos-llm` | Klien model bahasa | — (ikut terpasang otomatis) |
+| `aipos-core` | Model data, katalog, keranjang | — (ikut terpasang otomatis) |
+
+Anda cukup mendeklarasikan satu artifact. Artifact di bawahnya ikut terpasang secara
+transitif, dan tipenya bisa langsung dipakai dari kode Anda.
+
+## Cara memilih
+
+```mermaid
+flowchart TD
+    START{"Butuh agent kasir<br/>lewat chat?"}
+    START -->|ya| SDK["aipos-sdk"]
+    START -->|tidak| Q2{"Butuh saran<br/>produk dari AI?"}
+
+    Q2 -->|ya| Q3{"Juga butuh keranjang<br/>dan pembayaran?"}
+    Q2 -->|tidak| Q4{"Cara bayar?"}
+
+    Q3 -->|ya| SDK
+    Q3 -->|tidak| ADV["aipos-advisor"]
+
+    Q4 -->|"kartu di terminal"| PAY["aipos-payment"]
+    Q4 -->|"online (VA/QRIS)"| SDK
+    Q4 -->|keduanya| SDK
+```
+
+## Yang ikut dan tidak ikut terbawa
+
+| Artifact | Ikut terbawa | Tidak ikut terbawa |
+|---|---|---|
+| `aipos-advisor` | Klien OpenAI, izin `INTERNET` | MineSec, izin NFC, agent |
+| `aipos-payment` | MineSec Headless, izin `NFC`, Activity tap kartu | Klien OpenAI, izin `INTERNET` |
+| `aipos-payment-online` | Klien HTTP Ktor | MineSec, izin NFC, klien OpenAI, izin `INTERNET`* |
+| `aipos-sdk` | Semua di atas | — |
+
+\* `aipos-payment-online` membutuhkan internet tetapi tidak mendeklarasikan izinnya sendiri.
+Tambahkan `android.permission.INTERNET` di manifest aplikasi Anda bila hanya memakai
+artifact ini.
+
+## Memakai dua artifact berdampingan
+
+Memasang `aipos-advisor` **dan** `aipos-payment` sekaligus itu sah — `aipos-core` tidak
+terduplikasi. Namun masing-masing titik masuk punya keranjangnya sendiri:
+
+```mermaid
+flowchart LR
+    APP["Aplikasi Anda"] --> ADV["AdvisorClient"]
+    APP --> PAY["PaymentClient"]
+    PAY --> CART["Keranjang"]
+    ADV -. "tidak bisa menambah ke" .-> CART
+```
+
+`AdvisorClient` tidak punya keranjang sama sekali. Bila saran produk harus bisa langsung
+masuk ke keranjang yang dibayar, Anda punya dua pilihan:
+
+- Pakai `aipos-sdk` — satu keranjang dipakai bersama oleh penyaran, agent, dan pembayaran.
+- Tetap memakai dua artifact, dan panggil `payment.addToCart(saran.product.id)` sendiri
+  saat sales mengetuk kartu saran.
+
+:::tip[Rekomendasi]
+Kalau ragu, mulailah dengan `aipos-sdk`. Setelah fitur yang dipakai jelas, Anda bisa
+menggantinya dengan artifact yang lebih kecil tanpa mengubah model data.
+:::
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation.md -->
+
+# Instalasi
+
+AI POS SDK dipublikasikan di Maven dengan koordinat `com.weekendinc.aipos:<artifact>:0.1.1`.
+
+## 1. Daftarkan repository
+
+SDK dipublikasikan di **GitHub Packages privat**, bukan Maven Central — lisensinya
+proprietary, bukan open source. Minta kredensial akses ke tim AI POS SDK, lalu simpan
+di **gradle home** Anda — bukan di dalam proyek:
+
+```properties
+# ~/.gradle/gradle.properties
+GITHUB_PACKAGES_LOGIN=<GitHub username granted access>
+GITHUB_PACKAGES_TOKEN=<personal access token, scope read:packages>
+```
+
+Kemudian daftarkan repository-nya di `settings.gradle.kts`, di samping `google()`:
+
+**settings.gradle.kts**
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "AIPosSDK"
+            url = uri("https://maven.pkg.github.com/dev-mobile-wknd/aipos-sdk-android")
+            credentials {
+                username = providers.gradleProperty("GITHUB_PACKAGES_LOGIN").get()
+                password = providers.gradleProperty("GITHUB_PACKAGES_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+**settings.gradle**
+
+```groovy
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "AIPosSDK"
+            url = uri("https://maven.pkg.github.com/dev-mobile-wknd/aipos-sdk-android")
+            credentials {
+                username = providers.gradleProperty("GITHUB_PACKAGES_LOGIN").get()
+                password = providers.gradleProperty("GITHUB_PACKAGES_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+:::danger[Jangan commit kredensial]
+Menaruh `GITHUB_PACKAGES_TOKEN` di `gradle.properties` milik proyek membuatnya mudah ikut
+ter-commit ke Git. Simpan di `~/.gradle/gradle.properties`, atau di secret CI Anda sebagai
+variabel lingkungan `ORG_GRADLE_PROJECT_GITHUB_PACKAGES_TOKEN`.
+:::
+
+### Repository MineSec (pembayaran kartu)
+
+Lewati bagian ini bila Anda **tidak** memakai `aipos-payment` maupun `aipos-sdk`.
+
+Kedua artifact tersebut bergantung pada MineSec Headless SDK, yang dipublikasikan di
+GitHub Packages **privat**. Minta kredensial registry ke tim dukungan MineSec, lalu simpan
+di **gradle home** Anda — bukan di dalam proyek:
+
+```properties
+# ~/.gradle/gradle.properties
+MINESEC_REGISTRY_LOGIN=<login from MineSec>
+MINESEC_REGISTRY_TOKEN=<token from MineSec>
+```
+
+Kemudian daftarkan repository-nya:
+
+**settings.gradle.kts**
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "MineSec"
+            url = uri("https://maven.pkg.github.com/theminesec/ms-registry-client")
+            credentials {
+                username = providers.gradleProperty("MINESEC_REGISTRY_LOGIN").get()
+                password = providers.gradleProperty("MINESEC_REGISTRY_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+**settings.gradle**
+
+```groovy
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "MineSec"
+            url = uri("https://maven.pkg.github.com/theminesec/ms-registry-client")
+            credentials {
+                username = providers.gradleProperty("MINESEC_REGISTRY_LOGIN").get()
+                password = providers.gradleProperty("MINESEC_REGISTRY_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+:::danger[Jangan commit kredensial]
+Menaruh `MINESEC_REGISTRY_TOKEN` di `gradle.properties` milik proyek membuatnya mudah ikut
+ter-commit ke Git. Simpan di `~/.gradle/gradle.properties`, atau di secret CI Anda
+sebagai variabel lingkungan `ORG_GRADLE_PROJECT_MINESEC_REGISTRY_TOKEN`.
+:::
+
+## 2. Tambahkan dependensi
+
+Pilih artifact sesuai [kebutuhan Anda](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/choosing-artifacts).
+
+**build.gradle.kts**
+
+```kotlin
+dependencies {
+    // All features
+    implementation("com.weekendinc.aipos:aipos-sdk:0.1.1")
+
+    // — or only specific features —
+    // implementation("com.weekendinc.aipos:aipos-advisor:0.1.1")
+    // implementation("com.weekendinc.aipos:aipos-payment:0.1.1")
+    // implementation("com.weekendinc.aipos:aipos-payment-online:0.1.1")
+}
+```
+
+**build.gradle**
+
+```groovy
+dependencies {
+    // All features
+    implementation 'com.weekendinc.aipos:aipos-sdk:0.1.1'
+
+    // — or only specific features —
+    // implementation 'com.weekendinc.aipos:aipos-advisor:0.1.1'
+    // implementation 'com.weekendinc.aipos:aipos-payment:0.1.1'
+    // implementation 'com.weekendinc.aipos:aipos-payment-online:0.1.1'
+}
+```
+
+**gradle/libs.versions.toml**
+
+```toml
+[versions]
+aipos = "0.1.1"
+
+[libraries]
+aipos-sdk = { module = "com.weekendinc.aipos:aipos-sdk", version.ref = "aipos" }
+aipos-advisor = { module = "com.weekendinc.aipos:aipos-advisor", version.ref = "aipos" }
+aipos-payment = { module = "com.weekendinc.aipos:aipos-payment", version.ref = "aipos" }
+aipos-payment-online = { module = "com.weekendinc.aipos:aipos-payment-online", version.ref = "aipos" }
+
+# then in build.gradle.kts:
+# implementation(libs.aipos.sdk)
+```
+
+### Proyek Kotlin Multiplatform
+
+Tambahkan dependensi di `commonMain`. Gradle memilih varian Android atau iOS secara
+otomatis.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("com.weekendinc.aipos:aipos-sdk:0.1.1")
+        }
+    }
+}
+```
+
+Untuk mengekspos tipe SDK ke Swift, lihat [Integrasi iOS](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/ios).
+
+## 3. Sesuaikan konfigurasi Android
+
+SDK membutuhkan setelan minimum berikut di modul aplikasi:
+
+```kotlin title="app/build.gradle.kts"
+android {
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 26
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+```
+
+## 4. Periksa izin di manifest
+
+Sebagian izin sudah ikut ter-*merge* dari manifest artifact SDK:
+
+| Izin / komponen | Didaftarkan oleh | Perlu Anda tambahkan? |
+|---|---|---|
+| `android.permission.INTERNET` | `aipos-llm` (ikut di `aipos-sdk`, `aipos-advisor`) | Hanya bila memakai `aipos-payment-online` saja |
+| `android.permission.NFC` | `aipos-payment` | Tidak |
+| Activity `AIPosHeadlessActivity` | `aipos-payment` | Tidak |
+| `android.permission.RECORD_AUDIO` | — | Ya, bila memakai mikrofon untuk penyaran produk |
+
+```xml title="AndroidManifest.xml"
+<!-- Only if using aipos-payment-online without any other artifact -->
+<uses-permission android:name="android.permission.INTERNET" />
+```
+
+## 5. Verifikasi
+
+Sinkronkan Gradle, lalu pastikan dependensinya terpecahkan:
+
+```bash
+./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep aipos
+```
+
+Anda seharusnya melihat `com.weekendinc.aipos:aipos-core:0.1.1` beserta artifact yang
+Anda deklarasikan.
+
+:::tip[Selanjutnya]
+Lanjutkan ke [Mulai cepat](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/quick-start) untuk menjalankan transaksi pertama.
+:::
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/quick-start.md -->
+
+# Mulai cepat
+
+Panduan ini membawa Anda dari proyek Android kosong sampai transaksi pertama berhasil —
+tanpa terminal, tanpa lisensi, dan tanpa backend. Pembayaran kartu memakai simulator bawaan
+yang selalu menyetujui transaksi.
+
+**Yang Anda perlukan:** proyek Android dengan Jetpack Compose, dan
+[SDK sudah terpasang](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation) (`aipos-sdk`). OpenAI API key opsional — hanya
+untuk langkah 6.
+
+## 1. Siapkan data produk
+
+SDK tidak membawa katalog. Buat daftar produk Anda sendiri:
+
+```kotlin
+import com.weekendinc.aipos.domain.entity.Product
+import com.weekendinc.aipos.domain.valueobject.Money
+import com.weekendinc.aipos.domain.valueobject.ProductId
+
+val storeProducts = listOf(
+    Product(
+        id = ProductId("GDG-001"),
+        name = "iPhone 15 128GB",
+        price = Money.fromRupiah(13_999_000),
+        barcode = "8991234500011",
+        category = "Smartphone",
+        stock = 12,
+        description = "48MP camera, USB-C",
+    ),
+    Product(
+        id = ProductId("GDG-002"),
+        name = "Google Pixel 8",
+        price = Money.fromRupiah(9_499_000),
+        barcode = "8991234500028",
+        category = "Smartphone",
+        stock = 5,
+        description = "Best low-light photos in its class",
+    ),
+)
+```
+
+:::warning[Harga dalam Rupiah penuh]
+`Money.fromRupiah(13_999_000)` berarti Rp 13.999.000. Jangan memakai konstruktor
+`Money(...)` untuk harga — konstruktor itu menerima nilai dalam **sen**.
+:::
+
+## 2. Inisialisasi terminal di `Application`
+
+```kotlin
+class PosApplication : Application() {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    override fun onCreate() {
+        super.onCreate()
+        appScope.launch {
+            val result = AiPosAndroid.initPlatform(this@PosApplication)
+            Log.d("POS", result.message)
+        }
+    }
+}
+```
+
+Jangan lupa mendaftarkan kelas ini di manifest: `<application android:name=".PosApplication" ...>`.
+
+## 3. Daftarkan Activity
+
+```kotlin
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AiPosAndroid.attachActivity(this)   // REQUIRED, and must be called in onCreate
+        setContent { PosScreen() }
+    }
+}
+```
+
+## 4. Rakit SDK
+
+Buat satu instance SDK per proses aplikasi. `ViewModel` adalah tempat yang wajar untuk
+aplikasi satu layar:
+
+```kotlin
+class PosViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val merchant = MerchantInfo(
+        id = "merchant_001",
+        name = "Jaya Gadget Store",
+        address = "Jl. Sudirman No. 1, Jakarta",
+        terminalId = "TID001",
+        mid = "MID123456",
+    )
+
+    val sdk: AIPosSDK = AIPosSDK.Builder()
+        .llmApiKey(BuildConfig.LLM_API_KEY)
+        .merchantInfo(merchant)
+        .productCatalog(MutableProductCatalog(storeProducts))
+        .android(application)
+        .build()
+
+    val catalog = sdk.observeCatalog()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val cart = sdk.observeCart()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Cart())
+
+    val paymentStatus = sdk.observePaymentState()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PaymentState.Idle)
+
+    fun addProduct(product: Product) = viewModelScope.launch {
+        sdk.addToCart(product.id)
+            .onFailure { failure -> Log.w("POS", failure.message) }
+    }
+
+    fun pay() = viewModelScope.launch {
+        sdk.processPayment().collect()   // status also flows into paymentStatus
+    }
+
+    override fun onCleared() {
+        // close() is a suspend function; run it in a scope that won't be cancelled.
+        CoroutineScope(Dispatchers.Default).launch { sdk.close() }
+    }
+}
+```
+
+:::tip[Belum punya OpenAI API key?]
+`build()` menolak berjalan tanpa `llmApiKey` atau `llmProxyBaseUrl`. Untuk mencoba
+keranjang dan pembayaran saja, isi `llmApiKey("dummy")` — fitur non-AI tetap berjalan, dan
+panggilan AI baru gagal saat benar-benar dipakai. Atau pakai
+[`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/payment-client), yang sama sekali tidak membutuhkan kunci.
+:::
+
+## 5. Gambar layarnya
+
+```kotlin
+@Composable
+fun PosScreen(vm: PosViewModel = viewModel()) {
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val cart by vm.cart.collectAsStateWithLifecycle()
+    val status by vm.paymentStatus.collectAsStateWithLifecycle()
+
+    Column(Modifier.padding(16.dp)) {
+        catalog.forEach { product ->
+            ListItem(
+                headlineContent = { Text(product.name) },
+                supportingContent = { Text(product.price.format()) },
+                trailingContent = {
+                    Button(onClick = { vm.addProduct(product) }) { Text("Add") }
+                },
+            )
+        }
+
+        Text("Total: ${cart.total.format()}  (${cart.itemCount} items)")
+
+        Button(onClick = { vm.pay() }, enabled = !cart.isEmpty) {
+            Text("Pay")
+        }
+
+        when (val s = status) {
+            is PaymentState.WaitingTap -> Text(s.message)
+            is PaymentState.Processing -> Text(s.message)
+            is PaymentState.Success -> Text("Paid: ${s.amount.format()}")
+            is PaymentState.Failed -> Text("Failed: ${s.errorMessage}")
+            PaymentState.Idle -> Unit
+        }
+    }
+}
+```
+
+Jalankan aplikasinya, tambahkan produk, lalu tekan **Pay**. Dalam simulator, Anda akan
+melihat "[SIMULASI] Tempelkan kartu ke terminal", disusul "Memproses…", lalu status lunas.
+Keranjang dikosongkan otomatis dan transaksinya tersimpan di riwayat.
+
+## 6. Coba fitur AI
+
+Dengan `LLM_API_KEY` yang valid, tambahkan dua fungsi ini ke ViewModel:
+
+```kotlin
+val suggestions = sdk.observeSuggestions()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+fun listen(text: String) = sdk.pushTranscript(text)
+
+fun chat(message: String) = viewModelScope.launch {
+    val answer = sdk.sendMessage(message)
+    Log.d("POS", answer)
+}
+```
+
+- Panggil `listen("saya cari hp buat foto-foto, budget 15 juta")` — sekitar satu setengah
+  detik kemudian `suggestions` terisi produk yang cocok.
+- Panggil `chat("tambahkan Pixel 8 satu")` — agent mencari produknya dan menambahkannya ke
+  keranjang, yang langsung terlihat di layar.
+
+## Selanjutnya
+
+- [Konfigurasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/configuration) — kunci API, identitas merchant, pembayaran online.
+- [Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/android) — terminal sungguhan, lisensi, dan praktik terbaik.
+- [Siap produksi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist) — sebelum aplikasi sampai ke kasir.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/configuration.md -->
+
+# Konfigurasi
+
+Semua konfigurasi diberikan lewat builder saat SDK dirakit. `build()` memvalidasi
+konfigurasi wajib dan melempar `IllegalArgumentException` bila ada yang kurang — kesalahan
+wiring ketahuan saat aplikasi dibuka, bukan saat pelanggan sudah menunggu di kasir.
+
+## Ringkasan builder
+
+| Metode | `AIPosSDK` | `AdvisorClient` | `PaymentClient` | `OnlinePaymentClient` |
+|---|:---:|:---:|:---:|:---:|
+| `.merchantInfo(...)` | wajib | — | wajib | wajib |
+| `.productCatalog(...)` | wajib | wajib | wajib | wajib |
+| `.llmApiKey(...)` / `.llmProxyBaseUrl(...)` | salah satu wajib | salah satu wajib | — | — |
+| `.onlinePayment(...)` / `.config(...)` | opsional | — | — | opsional |
+| `.android(context)` / `.ios()` | wajib | — | wajib | wajib |
+
+## Identitas merchant
+
+`MerchantInfo` dicetak di struk dan dikirim ke gateway pembayaran.
+
+```kotlin
+val merchant = MerchantInfo(
+    id = "merchant_001",                     // your internal id
+    name = "Jaya Gadget Store",              // printed on the receipt
+    address = "Jl. Sudirman No. 1, Jakarta",
+    terminalId = "TID001",                   // Terminal ID from the acquirer
+    mid = "MID123456",                       // Merchant ID from the acquirer
+    profileId = "prof_xxxxxxxx",             // your MineSec profile
+)
+```
+
+| Field | Keterangan |
+|---|---|
+| `id` | Identitas merchant di sistem Anda. |
+| `name` | Nama toko yang tercetak di struk. |
+| `address` | Alamat toko. |
+| `terminalId` | Terminal ID (TID) dari acquirer. |
+| `mid` | Merchant ID (MID) dari acquirer. |
+| `profileId` | Profil terminal MineSec dari dashboard MineSec. Bawaannya `MerchantInfo.DEFAULT_PROFILE_ID`, profil **lingkungan uji**. Merchant produksi wajib mengisi profilnya sendiri. |
+
+## Model bahasa
+
+Fitur AI (penyaran produk dan agent kasir) membutuhkan akses ke model bahasa. Pilih salah
+satu cara:
+
+**Pengembangan: API key langsung**
+
+```kotlin
+AIPosSDK.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)
+    // ...
+```
+
+**Produksi: lewat proxy**
+
+```kotlin
+AIPosSDK.Builder()
+    .llmProxyBaseUrl("https://api.tokoanda.com/llm")
+    // ...
+```
+
+| Situasi | Yang dipakai SDK |
+|---|---|
+| Hanya `llmApiKey` diisi | Memanggil OpenAI langsung dengan kunci tersebut. |
+| Hanya `llmProxyBaseUrl` diisi | Memanggil proxy tanpa kunci. |
+| Keduanya diisi | Memanggil **proxy**, dan `llmApiKey` dikirim sebagai token autentikasi ke proxy. |
+| Keduanya kosong | `build()` gagal: *"Salah satu dari llmApiKey(...) atau llmProxyBaseUrl(...) wajib diisi"*. |
+
+:::danger[API key di aplikasi bisa diekstrak]
+Siapa pun yang mengunduh APK Anda bisa membongkar kunci yang dibundel di dalamnya. Pakai
+`llmApiKey` hanya untuk pengembangan dan demo. Untuk produksi, lihat
+[Proxy LLM](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/llm-proxy).
+:::
+
+:::warning[Tanpa `/v1`]
+Isi `llmProxyBaseUrl` **tanpa** akhiran `/v1`. SDK menambahkan `v1/chat/completions`
+sendiri, jadi `https://api.tokoanda.com/llm/v1` akan menghasilkan URL ganda dan berujung 404.
+:::
+
+## Katalog produk
+
+Wajib untuk semua titik masuk. Lihat [Katalog produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog).
+
+```kotlin
+.productCatalog(MutableProductCatalog(storeProducts))
+```
+
+## Pembayaran online
+
+Opsional. Tanpa pemanggilan ini, SDK memakai `OnlinePaymentConfig()` bawaan yang menunjuk
+**lingkungan beta** — cocok untuk mencoba alur, bukan untuk transaksi sungguhan.
+
+```kotlin
+AIPosSDK.Builder()
+    .onlinePayment(
+        OnlinePaymentConfig(
+            baseUrl = "https://pay-api.tokoanda.co.id",   // without /v1
+            apiKey = BuildConfig.POS_BACKEND_API_KEY,
+            email = "cashier@tokoanda.co.id",
+            password = passwordFromSecureStorage,
+            loopbackUrlReplacement = "",                  // disable in production
+        )
+    )
+```
+
+:::warning[Selalu pakai argumen bernama]
+`OnlinePaymentConfig` punya lima belas parameter. Memanggilnya secara posisional mudah
+tertukar tanpa error kompilasi — misalnya kata sandi masuk sebagai email.
+:::
+
+Tiga mode yang bisa Anda pilih:
+
+| Mode | Cara mengaktifkan | Perilaku |
+|---|---|---|
+| **Purwarupa** | `OnlinePaymentConfig(baseUrl = "")` | Tidak ada permintaan HTTP sama sekali. SDK memakai halaman pembayaran contoh. Untuk mengembangkan UI. |
+| **Beta** | Tidak memanggil `.onlinePayment(...)`, atau hanya mengisi `apiKey` | Backend beta bersama milik SDK. Untuk uji integrasi. |
+| **Produksi** | Isi `baseUrl`, `apiKey`, `email`, `password` milik Anda | Backend merchant Anda sendiri. |
+
+Daftar lengkap parameter ada di [OnlinePaymentConfig](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-config).
+
+## Menyimpan rahasia
+
+Jangan menulis kunci langsung di kode. Pola sederhana untuk Android:
+
+```properties
+# local.properties — gitignored by default
+LLM_API_KEY=sk-proj-...
+POS_BACKEND_API_KEY=...
+```
+
+```kotlin title="app/build.gradle.kts"
+import java.util.Properties
+
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
+android {
+    buildFeatures { buildConfig = true }
+    defaultConfig {
+        buildConfigField("String", "LLM_API_KEY", "\"${localProps.getProperty("LLM_API_KEY", "")}\"")
+        buildConfigField("String", "POS_BACKEND_API_KEY", "\"${localProps.getProperty("POS_BACKEND_API_KEY", "")}\"")
+    }
+}
+```
+
+Cara ini menjauhkan kunci dari Git, **tetapi kunci tetap ikut terbundel di APK**. Untuk
+produksi, pindahkan kunci ke server — lihat [Siap produksi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist).
+
+## Pesan error dari `build()`
+
+| Pesan | Penyebab |
+|---|---|
+| `MerchantInfo wajib diisi — panggil merchantInfo(...)` | `.merchantInfo(...)` belum dipanggil. |
+| `Sumber katalog wajib diisi — panggil productCatalog(...)` | `.productCatalog(...)` belum dipanggil. |
+| `Platform belum diatur — panggil .android(context) di Android atau .ios() di iOS` | Lupa memanggil `.android(context)` atau `.ios()`. |
+| `Salah satu dari llmApiKey(...) atau llmProxyBaseUrl(...) wajib diisi` | Kedua jalur model bahasa kosong. |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/ai-agents.md -->
+
+# Memakai AI agent
+
+Dokumentasi ini juga tersedia dalam format yang bisa dibaca langsung oleh asisten coding
+AI seperti Claude Code, Cursor, Codex, atau ChatGPT. Dengan begitu, agent menulis kode
+dengan API SDK yang sebenarnya, bukan menebak nama fungsi.
+
+| Yang Anda butuhkan | Pakai |
+|---|---|
+| Agent coding yang paham SDK di setiap sesi | [Agent skill](#agent-skill) |
+| Seluruh dokumentasi sebagai konteks | [`llms.txt`](#llmstxt) |
+| Bertanya tentang satu halaman | [Menu Copy page](#menu-copy-page) |
+
+## Agent skill
+
+`SKILL.md` adalah ringkasan SDK untuk agent: pilihan artifact, cara instalasi, cara
+merakit SDK, aturan yang mencegah bug paling umum, dan perbedaan di Swift. Agent
+memuatnya otomatis saat Anda bekerja dengan kode yang memakai `com.weekendinc.aipos`.
+
+Untuk **Claude Code**, simpan di folder skill proyek Anda:
+
+```bash
+mkdir -p .claude/skills/aipos-sdk
+curl -fsSL https://dev-mobile-wknd.github.io/aipos-sdk-docs/skills/aipos-sdk/SKILL.md \
+  -o .claude/skills/aipos-sdk/SKILL.md
+```
+
+Commit folder `.claude/skills/` agar seluruh tim memakai skill yang sama. Untuk memakainya
+di semua proyek Anda, simpan di `~/.claude/skills/aipos-sdk/SKILL.md`.
+
+Untuk agent lain yang belum mendukung skill, tempelkan isi file tersebut ke berkas
+instruksinya — misalnya `AGENTS.md` atau aturan proyek Cursor.
+
+:::warning[Unduh ulang setiap kali memperbarui SDK]
+Skill ditulis untuk versi SDK tertentu (saat ini 0.1.1). Setelah menaikkan versi SDK,
+jalankan lagi perintah `curl` di atas agar agent tidak memakai API versi lama.
+:::
+
+## llms.txt
+
+Seluruh dokumentasi tersedia sebagai Markdown biasa mengikuti standar
+[llms.txt](https://llmstxt.org):
+
+| Alamat | Isi |
+|---|---|
+| [`/llms.txt`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/llms.txt) | Daftar semua halaman beserta ringkasan satu kalimat |
+| [`/llms-full.txt`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/llms-full.txt) | Seluruh dokumentasi dalam satu file |
+| `<alamat halaman>.md` | Satu halaman sebagai Markdown, misalnya [`/guide/installation.md`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation.md) |
+
+Berikan alamat `llms.txt` ke agent yang bisa membuka web, lalu minta ia membaca halaman
+yang relevan. Untuk agent tanpa akses web, unggah `llms-full.txt` sebagai lampiran.
+
+Versi Bahasa Indonesia tersedia di bawah `/id/`, misalnya
+[`/id/llms.txt`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/llms.txt).
+
+## Menu Copy page
+
+Setiap halaman dokumentasi punya tombol **Copy page** di kanan atas judul:
+
+| Aksi | Hasil |
+|---|---|
+| **Copy page** | Menyalin halaman sebagai Markdown, siap ditempel ke chat AI |
+| **View as Markdown** | Membuka versi Markdown halaman di tab baru |
+| **Open in ChatGPT** | Membuka ChatGPT dengan prompt untuk membaca halaman ini |
+| **Open in Claude** | Membuka Claude dengan prompt untuk membaca halaman ini |
+
+## Tips
+
+- **Sebutkan versi SDK** yang Anda pakai. Semua artifact `com.weekendinc.aipos:*` harus
+  berada di versi yang sama.
+- **Jangan menempelkan kunci rahasia** — `llmApiKey`, `apiKey`, atau password pembayaran
+  online — ke chat AI. Pakai placeholder dan isi nilainya di `local.properties`.
+- **Periksa kode pembayaran** yang dihasilkan agent terhadap
+  [Checklist produksi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist) sebelum dirilis.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/android.md -->
+
+# Integrasi Android
+
+Halaman ini merangkum semua yang khusus Android: siklus hidup, terminal pembayaran,
+lisensi MineSec, dan praktik terbaik dengan Jetpack Compose.
+
+## Langkah wajib
+
+Dua langkah terikat pada siklus hidup Android dan tidak bisa dilewati bila Anda memakai
+pembayaran kartu (`aipos-payment` atau `aipos-sdk`).
+
+### 1. `initPlatform` di `Application.onCreate`
+
+MineSec memvalidasi lisensi dan menyiapkan kunci kriptografi sebelum transaksi pertama.
+Mulailah sedini mungkin:
+
+```kotlin
+class PosApplication : Application() {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private val _terminalSiap = MutableStateFlow<PlatformInitResult?>(null)
+    val terminalSiap: StateFlow<PlatformInitResult?> = _terminalSiap.asStateFlow()
+
+    override fun onCreate() {
+        super.onCreate()
+        appScope.launch {
+            _terminalSiap.value = AiPosAndroid.initPlatform(
+                application = this@PosApplication,
+                licenseName = "tokoanda.license",   // file di src/main/assets/
+            )
+        }
+    }
+}
+```
+
+`PlatformInitResult` berisi `success` dan `message`. Tampilkan `message` ke kasir bila
+`success` bernilai `false` — misalnya saat file lisensi tidak ditemukan.
+
+### 2. `attachActivity` di `onCreate`
+
+Layar tap kartu diluncurkan lewat `registerForActivityResult`, yang hanya boleh
+didaftarkan sebelum Activity mencapai status `STARTED`:
+
+```kotlin
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AiPosAndroid.attachActivity(this)   // sebelum setContent, jangan di onResume
+        setContent { PosApp() }
+    }
+}
+```
+
+Melewatkan langkah ini membuat `processPayment()` memancarkan `PaymentState.Failed`
+dengan pesan yang menjelaskan penyebabnya.
+
+## Terminal sungguhan vs simulator
+
+Varian terminal ditentukan saat artifact `aipos-payment` **dibangun dan dipublikasikan**:
+
+| Varian | Perilaku |
+|---|---|
+| **MineSec** | Ponsel NFC menjadi terminal tap-to-pay sungguhan. Butuh lisensi dan `profileId`. |
+| **Simulator** | Tidak ada NFC. Setiap transaksi disetujui setelah ±3 detik. Pesan diawali `[SIMULASI]` dan `transactionId` diawali `SIM-`. |
+
+:::danger[Pastikan varian yang Anda terima]
+Koordinat Maven yang sama bisa berisi varian mana pun. Sebelum rilis ke kasir, lakukan satu
+transaksi uji dan pastikan pesannya **tidak** diawali `[SIMULASI]`. Simulator tidak
+memindahkan uang sama sekali.
+:::
+
+### Kebutuhan MineSec
+
+1. **Kredensial registry** — lihat [Instalasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation#repository-minesec-pembayaran-kartu).
+2. **File lisensi** (`*.license`) dari MineSec, diletakkan di `app/src/main/assets/`.
+   Nama bawaan yang dicari SDK adalah `AiPosAndroid.DEFAULT_LICENSE_NAME`
+   (`public-test.license`, lisensi uji).
+3. **`profileId`** dari dashboard MineSec, diisi di [`MerchantInfo`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/configuration#identitas-merchant).
+4. **Perangkat dengan NFC**. Tambahkan deklarasi berikut bila aplikasi juga harus bisa
+   dipasang di perangkat tanpa NFC:
+
+```xml
+<uses-feature android:name="android.hardware.nfc" android:required="false" />
+```
+
+## Di mana menyimpan instance SDK
+
+Buat **satu instance per proses**. Setiap instance menyimpan keranjang dan riwayat transaksi
+di penyimpanan lokal perangkat, dan dua instance yang hidup berbarengan akan saling menimpa.
+
+| Aplikasi Anda | Tempat yang disarankan |
+|---|---|
+| Satu layar kasir | `ViewModel` layar tersebut |
+| Beberapa layar berbagi keranjang | Singleton di `Application` atau container DI Anda (Hilt/Koin) |
+
+SDK memakai container Koin miliknya sendiri, jadi aman dipakai berdampingan dengan Koin atau
+Hilt milik aplikasi Anda.
+
+Panggil `close()` saat SDK tidak dipakai lagi. Di `AIPosSDK`, `close()` adalah fungsi
+suspend.
+
+## Mengamati state dengan Compose
+
+Semua `observe*()` mengembalikan `Flow`. Ubah jadi `StateFlow` di ViewModel supaya layar
+langsung punya nilai awal:
+
+```kotlin
+val cart: StateFlow<Cart> = sdk.observeCart()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Cart())
+```
+
+```kotlin
+@Composable
+fun CartBar(vm: PosViewModel) {
+    val cart by vm.cart.collectAsStateWithLifecycle()
+    Text("${cart.itemCount} items · ${cart.total.format()}")
+}
+```
+
+`collectAsStateWithLifecycle` (dari `androidx.lifecycle:lifecycle-runtime-compose`)
+menghentikan pengamatan saat aplikasi di latar belakang.
+
+## Memanggil dari Java
+
+Fungsi `suspend` dan `Flow` tidak nyaman dipanggil dari Java. Bungkus di sisi Kotlin, atau
+pakai callback yang memang disediakan untuk pembayaran online:
+
+```kotlin
+val registration = sdk.addOnlinePaymentListener { status -> /* ... */ }
+registration.cancel()   // when the screen is closed
+```
+
+## Log
+
+SDK menulis log pembayaran online dengan tag `AiPos/online-payment`:
+
+```bash
+adb logcat | grep AiPos/online-payment
+```
+
+Saat SDK dirakit, satu baris log mengumumkan mode pembayaran online yang aktif (purwarupa
+atau API), alamat backend, dan apakah kunci serta login sudah diatur. Kata sandi tidak
+pernah dicetak.
+
+## Contoh lengkap
+
+Aplikasi contoh `sample-android` di repository SDK memperlihatkan integrasi utuh: grid
+produk, mikrofon, chip saran AI, keranjang, pembayaran kartu, dan pembayaran online di
+bottom sheet.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/ios.md -->
+
+# Integrasi iOS
+
+Di iOS, semua fitur berjalan **kecuali pembayaran kartu contactless**. Penyaran produk,
+agent kasir, keranjang, dan pembayaran online berfungsi penuh.
+
+## Memilih jalur integrasi
+
+Artifact Maven hanya bisa dikonsumsi oleh Gradle. Jalur yang Anda tempuh bergantung pada
+bentuk aplikasi iOS Anda:
+
+| Aplikasi iOS Anda | Jalur |
+|---|---|
+| Sudah memakai **Kotlin Multiplatform** (ada modul `shared`) | [A. Lewat modul shared](#a-lewat-modul-shared-kotlin-multiplatform) |
+| **Swift murni** tanpa Gradle | [B. Swift Package Manager](#b-swift-package-manager-untuk-aplikasi-swift) |
+
+### A. Lewat modul shared (Kotlin Multiplatform)
+
+Tambahkan SDK sebagai dependensi `api` dan **ekspor** ke framework iOS Anda. Tanpa `export`,
+tipe milik SDK tidak terlihat dari Swift.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    listOf(iosArm64(), iosSimulatorArm64(), iosX64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "Shared"
+            isStatic = true
+            export("com.weekendinc.aipos:aipos-sdk:0.1.1")
+            export("com.weekendinc.aipos:aipos-core:0.1.1")
+            export("com.weekendinc.aipos:aipos-advisor:0.1.1")
+            export("com.weekendinc.aipos:aipos-agent:0.1.1")
+            export("com.weekendinc.aipos:aipos-payment:0.1.1")
+            export("com.weekendinc.aipos:aipos-payment-online:0.1.1")
+        }
+    }
+
+    sourceSets {
+        commonMain.dependencies {
+            api("com.weekendinc.aipos:aipos-sdk:0.1.1")
+        }
+    }
+}
+```
+
+Di Swift, `import Shared` lalu pakai contoh-contoh di bawah. Kotlin versi 2.3.21 atau lebih
+baru diperlukan agar klib SDK bisa dibaca.
+
+### B. Swift Package Manager untuk aplikasi Swift
+
+Aplikasi Swift murni menambahkan `AIPosSDK` lewat Swift Package Manager — bukan lewat Maven.
+Binary-nya (`AIPosSDK.xcframework`, static) di-host di repo distribusi publik terpisah dari
+source SDK:
+
+1. Xcode → **File → Add Package Dependencies…**
+2. Masukkan URL: `https://github.com/dev-mobile-wknd/swift-aipos-sdk`
+3. Pilih versi yang diinginkan (mengikuti tag rilis, misalnya `0.1.1`)
+4. Xcode mengunduh binary-nya, memverifikasi checksum, dan menautkannya secara otomatis
+
+Setelah package ditambahkan, atur satu setelan build tambahan di target aplikasi:
+
+```
+OTHER_LDFLAGS = $(inherited) -lc++
+```
+
+:::warning[`-lc++` wajib]
+Runtime Kotlin/Native memakai libc++, dan pada framework statis pustaka itu tidak ikut
+terbawa — SwiftPM tidak menambahkannya otomatis untuk binary target. Tanpa `-lc++`,
+penautan gagal dengan simbol `std::` yang tidak ditemukan.
+:::
+
+:::info[Kenapa repo distribusi terpisah dan publik?]
+Repo itu hanya berisi `Package.swift` dan binary hasil kompilasi — source Kotlin SDK tetap
+privat. Dibuat publik karena SwiftPM tidak bisa mengautentikasi unduhan `binaryTarget` dari
+GitHub Release privat. Ini tidak membocorkan apa pun yang sensitif: SDK tetap tidak berguna
+tanpa `llmApiKey`, `merchantInfo`, dan kredensial payment yang diterbitkan lewat proses
+onboarding merchant.
+:::
+
+## Merakit SDK dari Swift
+
+```swift
+import AIPosSDK
+
+let merchant = MerchantInfo(
+    id: "merchant_001",
+    name: "Jaya Gadget Store",
+    address: "Jl. Sudirman No. 1, Jakarta",
+    terminalId: "TID001",
+    mid: "MID123456",
+    profileId: MerchantInfo.companion.DEFAULT_PROFILE_ID
+)
+
+let catalog = MutableProductCatalog(initial: [
+    IosDomainFactoryKt.productOf(
+        id: "GDG-001", name: "iPhone 15 128GB", priceRupiah: 13_999_000,
+        barcode: "8991234500011", category: "Smartphone", stock: 12,
+        description: "48MP camera, USB-C", imageUrl: ""
+    ),
+])
+
+let sdk = AIPosSDK.Builder()
+    .llmApiKey(key: apiKey)
+    .merchantInfo(info: merchant)
+    .productCatalog(source: catalog)
+    .onlinePayment(config: IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(apiKey: posApiKey))
+    .ios()
+    .build()
+```
+
+:::info[Nilai bawaan tidak menyeberang ke Swift]
+Parameter Kotlin yang punya nilai bawaan tetap wajib diisi dari Swift. Karena itu
+`MerchantInfo` di atas menuliskan `profileId` secara eksplisit, dan `Product` dirakit lewat
+`productOf` alih-alih konstruktornya.
+:::
+
+## Mengamati `Flow` dari Swift
+
+Fungsi `collect` yang dipanggil dari Swift **tidak ikut batal** ketika `Task` Swift
+dibatalkan. Pakai `FlowSubscriptionKt.subscribe`, yang mengembalikan pegangan untuk
+menghentikannya:
+
+```swift
+@MainActor
+final class PosViewModel: ObservableObject {
+    @Published var cart: Cart?
+    private var subscriptions: [FlowSubscription] = []
+
+    func start() {
+        subscriptions.append(FlowSubscriptionKt.subscribe(sdk.observeCart()) { [weak self] value in
+            guard let cart = value as? Cart else { return }
+            self?.cart = cart                   // already on the main thread
+        })
+    }
+
+    func stop() {
+        subscriptions.forEach { $0.cancel() }
+        subscriptions.removeAll()
+    }
+}
+```
+
+Nilai yang diterima bertipe `Any?` karena generik Kotlin tidak terbawa ke Objective-C —
+turunkan sendiri dengan `as?`.
+
+## Memanggil fungsi `suspend`
+
+Fungsi suspend muncul sebagai fungsi `async throws` di Swift:
+
+```swift
+Task {
+    do {
+        let result = try await sdk.addToCart(productId: product.id, quantity: 1)
+        if let failure = result as? PosResultFailure {
+            errorMessage = failure.message
+        }
+    } catch {
+        errorMessage = error.localizedDescription
+    }
+}
+```
+
+`PosResult` terbaca sebagai `PosResultSuccess<T>` dan `PosResultFailure`.
+
+## Yang berubah bentuk di Swift
+
+| Kotlin | Di Swift | Solusinya |
+|---|---|---|
+| `Money` (harga, total) | `Int64` berisi **sen** | `IosDomainFactoryKt.formatMoneyCents(cents:)` → `"Rp 13.999.000"` |
+| `ProductId` | `Any` | Oper `product.id` apa adanya; baca teksnya dengan `IosDomainFactoryKt.productIdValue(product:)` |
+| Konstruktor `Product` | Tidak bisa dipakai | `IosDomainFactoryKt.productOf(...)` dengan harga dalam Rupiah penuh |
+| Konstruktor `OnlinePaymentConfig` | 15 argumen wajib | `IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(...)` |
+| `Flow<T>` | Tidak bisa di-`for await` | `FlowSubscriptionKt.subscribe(flow) { }` |
+| `AiposPaymentNavigationDelegate` | `unavailable` | Tulis `WKNavigationDelegate` sendiri — lihat di bawah |
+
+Rincian semua fungsi jembatan ada di [Jembatan Swift](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/swift-bridge).
+
+## Pembayaran online di `WKWebView`
+
+Pembayaran online membutuhkan tiga sambungan: delegate navigasi, KVO pada `url`, dan
+*page probe*.
+
+```swift
+import WebKit
+
+final class PaymentWebViewController: UIViewController, WKNavigationDelegate {
+    private let sdk: AIPosSDK
+    private let session: WebPaymentSession
+    private var webView: WKWebView!
+    private var urlObservation: NSKeyValueObservation?
+
+    init(sdk: AIPosSDK, session: WebPaymentSession) {
+        self.sdk = sdk
+        self.session = session
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        webView = WKWebView(frame: view.bounds)
+        webView.navigationDelegate = self
+        view.addSubview(webView)
+
+        // 1. Single-page navigation happens via history.pushState, which does
+        //    not call the delegate. KVO catches it.
+        urlObservation = webView.observe(\.url) { [weak self] view, _ in
+            if let url = view.url?.absoluteString { self?.sdk.onWebViewUrlChanged(url: url) }
+        }
+
+        // 2. REQUIRED: without the probe, the status gets stuck at "choosing a method".
+        sdk.attachPaymentPageProbe(probe: IosPaymentPageProbeKt.paymentPageProbe(webView))
+
+        webView.load(URLRequest(url: URL(string: session.paymentUrl)!))
+    }
+
+    // 3. Navigation delegate
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let url = webView.url?.absoluteString { sdk.onWebViewUrlChanged(url: url) }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        sdk.onWebViewLoadFailed(reason: error.localizedDescription)
+    }
+}
+```
+
+Melaporkan URL yang sama berkali-kali tidak berdampak apa pun, jadi KVO dan delegate aman
+dipakai bersamaan. Alur lengkap dan status yang dipancarkan dijelaskan di
+[Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment).
+
+## Izin di `Info.plist`
+
+Bila Anda memakai mikrofon untuk penyaran produk, kedua kunci ini wajib ada. Menghilangkan
+salah satunya membuat aplikasi dihentikan paksa saat mikrofon dinyalakan.
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>The microphone is used to listen to conversations with customers.</string>
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Conversations are converted to text so the AI can suggest products.</string>
+```
+
+## Pembayaran kartu di iOS
+
+`processPayment()` di iOS langsung memancarkan satu `PaymentState.Failed` yang menjelaskan
+bahwa pembayaran contactless belum didukung. Sembunyikan tombol bayar kartu di iOS, dan
+tawarkan [pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment) sebagai gantinya.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/react-native.md -->
+
+# Integrasi React Native
+
+AI POS SDK adalah pustaka Kotlin, jadi aplikasi React Native mengaksesnya lewat
+**Native Module**. Panduan ini mencakup sisi Android.
+
+## 1. Tambahkan dependensi
+
+```kotlin title="android/app/build.gradle.kts"
+dependencies {
+    implementation("com.weekendinc.aipos:aipos-sdk:0.1.1")
+}
+```
+
+Pastikan `minSdk` minimal 26 dan `compileSdk` 36 — lihat [Instalasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation).
+Bila memakai pembayaran kartu, daftarkan juga
+[repository MineSec](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation#repository-minesec-pembayaran-kartu).
+
+## 2. Inisialisasi di `MainApplication` dan `MainActivity`
+
+```kotlin title="MainApplication.kt"
+override fun onCreate() {
+    super.onCreate()
+    CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+        AiPosAndroid.initPlatform(this@MainApplication)
+    }
+    // ...other React Native initialization
+}
+```
+
+```kotlin title="MainActivity.kt"
+class MainActivity : ReactActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AiPosAndroid.attachActivity(this)
+    }
+}
+```
+
+:::warning[`attachActivity` harus dari Activity]
+Native Module hanya menerima `ReactApplicationContext`, yang bukan `ComponentActivity`.
+Karena itu `attachActivity` dipanggil dari `MainActivity`, bukan dari dalam module.
+:::
+
+## 3. Buat Native Module
+
+```kotlin title="AiPosModule.kt"
+class AiPosModule(
+    private val reactContext: ReactApplicationContext,
+) : ReactContextBaseJavaModule(reactContext) {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val catalog = MutableProductCatalog()
+    private var sdk: AIPosSDK? = null
+
+    override fun getName() = "AiPos"
+
+    @ReactMethod
+    fun initialize(config: ReadableMap, promise: Promise) {
+        if (sdk != null) return promise.resolve(true)
+
+        val merchant = MerchantInfo(
+            id = config.getString("merchantId").orEmpty(),
+            name = config.getString("merchantName").orEmpty(),
+            address = config.getString("address").orEmpty(),
+            terminalId = config.getString("terminalId").orEmpty(),
+            mid = config.getString("mid").orEmpty(),
+            profileId = config.getString("profileId") ?: MerchantInfo.DEFAULT_PROFILE_ID,
+        )
+
+        val instance = runCatching {
+            AIPosSDK.Builder()
+                .llmProxyBaseUrl(config.getString("llmProxyBaseUrl").orEmpty())
+                .merchantInfo(merchant)
+                .productCatalog(catalog)
+                .android(reactContext)
+                .build()
+        }.getOrElse { return promise.reject("AIPOS_CONFIG", it) }
+
+        sdk = instance
+        scope.launch {
+            instance.observePaymentState().collect { state -> emit("AiPosPaymentState", state.toMap()) }
+        }
+        scope.launch {
+            instance.observeCart().collect { cart -> emit("AiPosCart", cart.toMap()) }
+        }
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun setProducts(products: ReadableArray) {
+        catalog.setProducts((0 until products.size()).map { i -> products.getMap(i)!!.toProduct() })
+    }
+
+    @ReactMethod
+    fun sendMessage(message: String, promise: Promise) {
+        val instance = sdk ?: return promise.reject("AIPOS_NOT_READY", "Call initialize() first")
+        scope.launch {
+            runCatching { instance.sendMessage(message) }
+                .onSuccess(promise::resolve)
+                .onFailure { promise.reject("AIPOS_ERROR", it) }
+        }
+    }
+
+    @ReactMethod
+    fun pay() {
+        val instance = sdk ?: return
+        scope.launch { instance.processPayment().collect() }
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) = Unit   // required for NativeEventEmitter
+
+    @ReactMethod
+    fun removeListeners(count: Int) = Unit
+
+    override fun invalidate() {
+        scope.cancel()
+        super.invalidate()
+    }
+
+    private fun emit(event: String, payload: WritableMap) {
+        reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit(event, payload)
+    }
+}
+```
+
+Fungsi pemetaan `toMap()` dan `toProduct()` ditulis sesuai bentuk data aplikasi Anda.
+Contoh untuk status pembayaran:
+
+```kotlin
+private fun PaymentState.toMap(): WritableMap = Arguments.createMap().apply {
+    putString("type", this@toMap::class.simpleName)
+    when (val s = this@toMap) {
+        is PaymentState.WaitingTap -> putString("message", s.message)
+        is PaymentState.Processing -> putString("message", s.message)
+        is PaymentState.Success -> {
+            putString("transactionId", s.transactionId)
+            putDouble("amountRupiah", s.amount.whole.toDouble())
+        }
+        is PaymentState.Failed -> putString("message", s.errorMessage)
+        PaymentState.Idle -> Unit
+    }
+}
+
+private fun ReadableMap.toProduct() = Product(
+    id = ProductId(getString("id")!!),
+    name = getString("name").orEmpty(),
+    price = Money.fromRupiah(getDouble("priceRupiah").toLong()),
+    barcode = getString("barcode").orEmpty(),
+    category = getString("category").orEmpty(),
+    stock = getInt("stock"),
+)
+```
+
+Daftarkan module lewat `ReactPackage` seperti Native Module pada umumnya.
+
+## 4. Pakai dari JavaScript
+
+```javascript
+import { NativeModules, NativeEventEmitter } from 'react-native';
+
+const { AiPos } = NativeModules;
+const events = new NativeEventEmitter(AiPos);
+
+await AiPos.initialize({
+  merchantId: 'merchant_001',
+  merchantName: 'Jaya Gadget Store',
+  address: 'Jl. Sudirman No. 1',
+  terminalId: 'TID001',
+  mid: 'MID123456',
+  llmProxyBaseUrl: 'https://api.tokoanda.com/llm',
+});
+
+AiPos.setProducts([
+  { id: 'GDG-001', name: 'iPhone 15 128GB', priceRupiah: 13999000,
+    barcode: '8991234500011', category: 'Smartphone', stock: 12 },
+]);
+
+const cartSub = events.addListener('AiPosCart', (cart) => setCart(cart));
+const paySub = events.addListener('AiPosPaymentState', (state) => {
+  if (state.type === 'WaitingTap') showTapPrompt(state.message);
+});
+
+const reply = await AiPos.sendMessage('find iPhone 15, add 1');
+
+// when the screen is closed
+cartSub.remove();
+paySub.remove();
+```
+
+## Catatan
+
+- Hanya satu instance SDK per proses — itulah alasan `initialize` di atas mengabaikan
+  panggilan kedua.
+- Untuk pembayaran online, `WebView` milik `react-native-webview` tidak mengekspos
+  `evaluateJavascript` yang dibutuhkan *page probe*. Tampilkan halaman pembayaran di
+  Activity atau `ViewManager` native yang memakai `AiposPaymentWebView` — lihat
+  [Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog.md -->
+
+# Katalog produk
+
+SDK **tidak membawa data produk**. Aplikasi Anda menyerahkan katalog lewat
+`ProductCatalogSource`, dan SDK hanya membacanya untuk:
+
+- menggambar daftar produk lewat `observeCatalog()`,
+- mencari produk saat agent kasir menerima perintah,
+- menyusun saran produk — hanya barang yang ada di katalog yang boleh disarankan,
+- memvalidasi stok saat barang ditambahkan ke keranjang.
+
+## Kontraknya
+
+```kotlin
+fun interface ProductCatalogSource {
+    fun observeProducts(): Flow<List<Product>>
+}
+```
+
+Bentuknya stream. Perubahan di sisi Anda — stok berkurang, harga naik, produk baru —
+langsung terlihat SDK tanpa perlu merakit ulang.
+
+## Pilihan 1: `MutableProductCatalog`
+
+Untuk katalog statis, atau bila Anda lebih suka mendorong data:
+
+```kotlin
+val catalog = MutableProductCatalog(initialProducts)
+
+val sdk = AIPosSDK.Builder()
+    .productCatalog(catalog)
+    // ...
+    .build()
+
+// Whenever the data changes, e.g. after syncing with the server:
+catalog.setProducts(latestProducts)
+```
+
+`setProducts` **mengganti seluruh isi** katalog, bukan menambah. Produk yang tidak ada di
+daftar baru langsung hilang dari pencarian dan saran. Aman dipanggil dari thread mana pun.
+
+## Pilihan 2: implementasi sendiri
+
+Bila katalog Anda sudah berupa stream — Room, SQLDelight, atau `StateFlow` di repository —
+sambungkan langsung supaya tidak ada salinan kedua yang bisa kedaluwarsa:
+
+```kotlin
+val catalog = ProductCatalogSource {
+    productDao.observeAll().map { rows -> rows.map { it.toAiposProduct() } }
+}
+
+private fun ProductEntity.toAiposProduct() = Product(
+    id = ProductId(sku),
+    name = name,
+    price = Money.fromRupiah(priceRupiah),
+    barcode = barcode.orEmpty(),
+    category = category,
+    stock = stock,
+    description = shortDescription.orEmpty(),
+    imageUrl = imageUrl.orEmpty(),
+)
+```
+
+:::warning[Dua syarat untuk implementasi sendiri]
+1. **Flow wajib memancarkan nilai pertama segera** — daftar kosong pun boleh. SDK menunggu
+   emisi pertama saat menambah barang ke keranjang; flow yang tidak pernah memancar akan
+   membuat kasir menunggu tanpa akhir.
+2. **Flow harus murah dikoleksi.** SDK mengoleksinya ulang setiap kali butuh katalog.
+   Pakai `StateFlow`, flow database, atau cache — jangan memanggil jaringan pada setiap
+   koleksi.
+:::
+
+## Model `Product`
+
+| Field | Tipe | Keterangan |
+|---|---|---|
+| `id` | `ProductId` | Identitas unik. Tidak boleh kosong. |
+| `name` | `String` | Nama tampilan. Dipakai agent saat mencari produk. |
+| `price` | `Money` | Harga satuan. Buat dengan `Money.fromRupiah(...)`. |
+| `barcode` | `String` | Kode batang (EAN-13), untuk pencarian lewat pemindai. |
+| `category` | `String` | Misalnya `"Smartphone"` atau `"Laptop"`. |
+| `stock` | `Int` | Sisa stok. Nol berarti habis dan tidak bisa ditambahkan ke keranjang. |
+| `description` | `String` | Ringkasan satu baris. **Sangat memengaruhi kualitas saran AI** — isi dengan keunggulan produk. |
+| `imageUrl` | `String` | Alamat gambar. SDK tidak pernah memuatnya; tampilkan dengan pemuat gambar Anda. |
+
+:::tip[Deskripsi yang baik menghasilkan saran yang baik]
+Penyaran produk mencocokkan kebutuhan pelanggan dengan `name`, `category`, `price`, dan
+`description`. Deskripsi seperti *"Kamera 48MP, baterai 2 hari, tahan air IP68"* jauh lebih
+berguna daripada *"HP bagus"*.
+:::
+
+## Stok tetap tanggung jawab Anda
+
+SDK memvalidasi permintaan terhadap angka `stock` yang Anda berikan, tetapi **tidak pernah
+mengurangi stok**. Setelah transaksi lunas, catat penjualan dan perbarui stok di sistem Anda.
+Karena katalog berupa stream, angka baru langsung dipakai SDK:
+
+```kotlin
+sdk.processPayment().collect { state ->
+    if (state is PaymentState.Success) {
+        val sold = sdk.observeTransactions(limit = 1).first().first().cart
+        inventory.reduceStock(sold.items)   // your own app's code
+    }
+}
+```
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/cart.md -->
+
+# Keranjang
+
+Fungsi keranjang tersedia di `AIPosSDK`, `PaymentClient`, dan `OnlinePaymentClient` (sejak
+0.1.1) dengan nama fungsi yang sama. Isinya disimpan di penyimpanan lokal perangkat, jadi
+tetap ada meskipun aplikasi ditutup.
+
+## Mengamati isi keranjang
+
+```kotlin
+sdk.observeCart().collect { cart ->
+    showTotal(cart.total.format())            // "Rp 23.498.000"
+    showItemCount(cart.itemCount)             // total quantity, not the number of rows
+    cart.items.forEach { item ->
+        println("${item.product.name} x${item.quantity} = ${item.subtotal.format()}")
+    }
+}
+```
+
+## Mengubah isi keranjang
+
+Semua operasi adalah fungsi `suspend` yang mengembalikan `PosResult<Cart>`:
+
+```kotlin
+scope.launch {
+    when (val result = sdk.addToCart(product.id, quantity = 1)) {
+        is PosResult.Success -> Unit                        // observeCart() updates too
+        is PosResult.Failure -> showMessage(result.message)  // safe to show to the cashier
+    }
+}
+```
+
+| Operasi | Fungsi | Gagal bila |
+|---|---|---|
+| Tambah | `addToCart(productId, quantity = 1)` | Jumlah ≤ 0, produk tidak ada di katalog, stok habis, atau total melebihi stok |
+| Ubah jumlah | `updateCartQuantity(productId, quantity)` | Produk tidak ada di keranjang, atau jumlah melebihi stok. Jumlah ≤ 0 menghapus baris. |
+| Hapus | `removeFromCart(productId)` | Produk tidak ada di keranjang |
+| Kosongkan | `clearCart()` | — |
+
+Contoh pesan kegagalan yang bisa langsung ditampilkan:
+
+- `iPhone 15 128GB sedang habis`
+- `Stok Google Pixel 8 tidak cukup. Tersedia 5, diminta 6`
+- `Produk tidak ada di keranjang`
+
+:::tip[Cara ringkas menangani hasil]
+```kotlin
+sdk.addToCart(product.id)
+    .onSuccess { cart -> haptic() }
+    .onFailure { failure -> snackbar(failure.message) }
+```
+:::
+
+## Kapan keranjang dikosongkan otomatis
+
+| Kejadian | Keranjang |
+|---|---|
+| Pembayaran kartu `PaymentState.Success` | Dikosongkan, setelah transaksi tersimpan ke riwayat |
+| Pembayaran online `WebPaymentStatus.Success` | Dikosongkan (sekali per pesanan) |
+| Pembayaran gagal atau dibatalkan | **Tidak** dikosongkan — pelanggan bisa mencoba lagi |
+| `resetSession()` di `AIPosSDK` | Dikosongkan, beserta percakapan dan saran |
+
+## Model `Cart`
+
+| Properti | Tipe | Keterangan |
+|---|---|---|
+| `items` | `List<CartItem>` | Baris belanja, urutan dipertahankan |
+| `subtotal` | `Money` | Jumlah semua baris sebelum potongan |
+| `discount` | `Money` | Potongan atas keseluruhan keranjang |
+| `total` | `Money` | `subtotal − discount`, tidak pernah negatif |
+| `itemCount` | `Int` | Total kuantitas semua produk |
+| `isEmpty` | `Boolean` | `true` bila tidak ada barang |
+
+`CartItem` berisi `product`, `quantity`, dan `subtotal` (harga × jumlah).
+
+`Cart` bersifat *immutable*: setiap perubahan menghasilkan objek baru, jadi aman dipakai
+langsung sebagai state UI.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/advisor.md -->
+
+# Penyaran produk
+
+Penyaran produk menyimak percakapan antara sales dan pelanggan, lalu mengusulkan barang dari
+katalog Anda beserta alasannya. SDK tidak ikut bicara, tidak menyentuh mikrofon, dan tidak
+menampilkan apa pun — aplikasi Anda yang memutuskan cara menyajikan sarannya.
+
+```
+Pelanggan : "saya cari hp buat foto-foto, budget 15 juta"
+  → iPhone 15 128GB — kamera 48MP, masih di bawah budget
+  → Google Pixel 8  — foto malam hari terbaik di kelasnya
+```
+
+**Tersedia di:** `AIPosSDK` (artifact `aipos-sdk`) dan `AdvisorClient` (artifact `aipos-advisor`).
+
+## Alurnya
+
+```mermaid
+sequenceDiagram
+    participant Mic as Mikrofon (aplikasi Anda)
+    participant App as Aplikasi Anda
+    participant SDK as AI POS SDK
+    participant LLM as Model bahasa
+
+    Mic->>App: potongan ucapan
+    App->>SDK: setInterimTranscript("saya cari hp bu...")
+    Mic->>App: kalimat selesai
+    App->>SDK: pushTranscript("saya cari hp buat foto-foto")
+    Note over SDK: menunggu percakapan mereda ±1,5 detik
+    SDK-->>App: state = Thinking
+    SDK->>LLM: transkrip + katalog
+    LLM-->>SDK: kebutuhan + produk
+    Note over SDK: buang produk yang tidak ada di katalog
+    SDK-->>App: suggestions, buyerIntent, state = Suggesting
+```
+
+## Merakit
+
+**Hanya penyaran (AdvisorClient)**
+
+```kotlin
+val advisor = AdvisorClient.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)   // or .llmProxyBaseUrl(...)
+    .productCatalog(catalog)
+    .build()                              // no Context needed
+```
+
+**Bersama fitur lain (AIPosSDK)**
+
+```kotlin
+val sdk = AIPosSDK.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .android(context)
+    .build()
+```
+
+`AdvisorClient.Builder` tidak membutuhkan `Context`, sehingga bisa dirakit di `commonMain`
+proyek Kotlin Multiplatform.
+
+## Menyetor percakapan
+
+```kotlin
+// A sentence that is already final
+sdk.pushTranscript("looking for a phone for photography, budget 15 million")
+
+// Optional: a partial phrase still being recognized, for ghost text on screen
+sdk.setInterimTranscript("looking for a pho...")
+```
+
+`pushTranscript` aman dipanggil sesering apa pun. Analisis tidak dijalankan per kalimat,
+melainkan setelah percakapan mereda sekitar 1,5 detik. Untuk memaksa analisis segera —
+misalnya saat sales menekan tombol "Saran" — panggil:
+
+```kotlin
+sdk.requestSuggestions()
+```
+
+Sumber teks bebas: speech-to-text perangkat, layanan transkripsi, atau ketikan. Lihat
+[Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/speech-to-text) untuk contoh di Android dan iOS.
+
+## Menerima saran
+
+```kotlin
+sdk.observeSuggestions().collect { suggestions ->
+    suggestions.forEach { s ->
+        showChip(
+            name = s.product.name,
+            price = s.product.price.format(),
+            reason = s.reason,           // In Indonesian, ready to read aloud to the customer
+            confidence = s.confidence,   // 0.0 – 1.0
+        )
+    }
+}
+```
+
+Saran diurutkan dari yang paling relevan. Setiap `ProductSuggestion` membawa objek
+`Product` utuh, jadi Anda bisa langsung menggambar kartu dan menambahkannya ke keranjang:
+
+```kotlin
+onChipClick = { s -> scope.launch { sdk.addToCart(s.product.id) } }
+```
+
+## State lain yang bisa diamati
+
+| Fungsi | Tipe | Kegunaan |
+|---|---|---|
+| `observeAdvisorState()` | `Flow<AdvisorState>` | `Idle`, `Thinking`, `Suggesting` — untuk indikator di tombol mikrofon |
+| `observeBuyerIntent()` | `Flow<String>` | Ringkasan kebutuhan pelanggan dalam satu kalimat |
+| `observeTranscript()` | `Flow<List<String>>` | Semua kalimat yang sudah disetor |
+| `observeInterimTranscript()` | `Flow<String>` | Potongan kalimat terakhir |
+| `observeAdvisorError()` | `Flow<String?>` | Kegagalan terakhir, `null` bila tidak ada |
+
+`AdvisorState` dipisahkan dari daftar saran karena UI perlu membedakan *"sedang berpikir"*
+dari *"tidak menemukan apa pun"* — keduanya sama-sama berarti daftar saran kosong.
+
+## Contoh Compose
+
+```kotlin
+@Composable
+fun SuggestionsBar(vm: PosViewModel) {
+    val suggestions by vm.suggestions.collectAsStateWithLifecycle()
+    val state by vm.advisorState.collectAsStateWithLifecycle()
+    val error by vm.advisorError.collectAsStateWithLifecycle()
+
+    Column {
+        if (state is AdvisorState.Thinking) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+        suggestions.forEach { s ->
+            AssistChip(
+                onClick = { vm.addProduct(s.product) },
+                label = { Text("${s.product.name} · ${s.product.price.format()}") },
+            )
+            Text(s.reason, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+```
+
+## Mengakhiri percakapan
+
+| Fungsi | Efek |
+|---|---|
+| `clearAdvisor()` (`AIPosSDK`) / `clear()` (`AdvisorClient`) | Kosongkan transkrip dan saran; keranjang tidak disentuh |
+| `resetSession()` (`AIPosSDK`) | Kosongkan transkrip, saran, percakapan agent, **dan** keranjang |
+| `close()` | Lepaskan semua sumber daya saat penyaran tidak dipakai lagi |
+
+Panggil salah satunya setiap kali pelanggan berganti. Transkrip pelanggan sebelumnya yang
+masih tersimpan akan membuat saran mengarah ke orang yang sudah pergi.
+
+## Jaminan dan batasan
+
+- **Saran selalu dari katalog Anda.** Produk yang disebut model tetapi tidak ada di katalog
+  dibuang sebelum sampai ke aplikasi.
+- **Membutuhkan internet** dan kunci model bahasa yang valid.
+- **Privasi:** transkrip percakapan dan data katalog dikirim ke penyedia model bahasa (atau
+  proxy Anda). Informasikan hal ini kepada pelanggan sesuai kebijakan privasi toko Anda.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/agent.md -->
+
+# Agent kasir
+
+Agent kasir menerima perintah dalam bahasa sehari-hari dan menjalankan transaksi sendiri:
+mencari produk, mengelola keranjang, memproses pembayaran, dan menyusun struk.
+
+```
+Kasir : cari iPhone 15, tambah 1, berapa totalnya?
+Agent : iPhone 15 128GB sudah masuk keranjang. Totalnya Rp 13.999.000. Lanjut bayar?
+Kasir : bayar
+Agent : Silakan tempelkan kartu ke terminal...
+Agent : Pembayaran berhasil (VISA). Ini struknya: ...
+```
+
+**Tersedia di:** `AIPosSDK` (artifact `aipos-sdk`) saja.
+
+## Mengirim pesan
+
+```kotlin
+scope.launch {
+    val answer: String = sdk.sendMessage("find MacBook Air then add 1")
+    // answer comes back in Indonesian
+}
+```
+
+`sendMessage` adalah fungsi `suspend` yang baru kembali setelah agent selesai — termasuk
+setelah menunggu pelanggan menempelkan kartu. Jangan menunggunya di thread UI tanpa
+indikator; amati `observeProcessing()` untuk menampilkan animasi.
+
+## Menampilkan percakapan
+
+```kotlin
+sdk.observeMessages().collect { history ->
+    history.forEach { message ->
+        when (message) {
+            is AgentMessage.UserMessage -> rightBubble(message.content)
+            is AgentMessage.AssistantMessage -> leftBubble(message.content)
+            is AgentMessage.ToolCall -> smallNote("${message.toolName}: ${message.summary}")
+            is AgentMessage.ErrorMessage -> errorBubble(message.message)
+        }
+    }
+}
+
+sdk.observeProcessing().collect { busy -> showTypingIndicator(busy) }
+```
+
+| Tipe `AgentMessage` | Isi |
+|---|---|
+| `UserMessage` | Pesan yang dikirim kasir (`content`) |
+| `AssistantMessage` | Jawaban agent (`content`) |
+| `ToolCall` | Catatan bahwa agent menjalankan sebuah aksi (`toolName`, `summary`) — berguna untuk audit |
+| `ErrorMessage` | Kegagalan saat memproses pesan (`message`) |
+
+Semua tipe punya `timestamp` dalam milidetik epoch.
+
+## Status pembayaran saat agent membayar
+
+Agent baru menjawab setelah transaksi selesai. Selama menunggu, tampilkan instruksi tap
+dari `observePaymentState()`:
+
+```kotlin
+sdk.observePaymentState().collect { state ->
+    when (state) {
+        is PaymentState.WaitingTap -> showTapDialog(state.message)
+        is PaymentState.Processing -> showTapDialog(state.message)
+        else -> dismissTapDialog()
+    }
+}
+```
+
+## Apa yang bisa dilakukan agent
+
+| Aksi | Contoh perintah |
+|---|---|
+| `search_product` — cari produk berdasarkan nama atau barcode | *"ada Samsung S24?"*, *"cek 8991234500011"* |
+| `manage_cart` — tambah, hapus, ubah jumlah, lihat, kosongkan | *"tambah 2"*, *"hapus Pixel-nya"*, *"berapa totalnya?"* |
+| `process_payment` — pembayaran kartu contactless | *"bayar"*, *"lanjut"* |
+| `generate_receipt` — susun struk teks lebar 40 karakter | *"cetak struknya"* |
+| `transaction_history` — riwayat transaksi terakhir | *"transaksi hari ini apa saja?"* |
+
+Keranjang yang diubah agent sama dengan keranjang yang diubah lewat `addToCart()` — tombol
+di layar dan perintah chat bisa dipakai bergantian.
+
+## Pengaman bawaan
+
+- **Tidak membayar tanpa konfirmasi.** Agent diwajibkan menampilkan total lebih dulu dan
+  menunggu kasir menjawab *"bayar"*, *"lanjut"*, atau *"ok"*. Aksi pembayaran menolak
+  berjalan bila konfirmasi itu tidak ada, tanpa menyentuh terminal.
+- **Tidak mengarang produk, harga, atau stok.** Semua angka berasal dari katalog Anda.
+- **Stok divalidasi** dengan aturan yang sama seperti `addToCart()`.
+
+## Mengawali transaksi baru
+
+```kotlin
+scope.launch { sdk.resetSession() }
+```
+
+`resetSession()` mengosongkan riwayat percakapan, saran, keranjang, dan status pembayaran
+sekaligus. Panggil setiap kali pelanggan berganti.
+
+## Batasan
+
+- Pembayaran lewat agent hanya mendukung **kartu contactless** — tidak tersedia di iOS.
+  Pembayaran online dijalankan dari tombol di layar lewat `startOnlinePayment()`.
+- Membutuhkan internet dan kunci model bahasa yang valid.
+- Setiap pesan memanggil model bahasa satu kali atau lebih, sehingga menimbulkan biaya
+  sesuai tarif penyedia model Anda.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/card-payment.md -->
+
+# Pembayaran kartu
+
+Pembayaran kartu mengubah ponsel Android ber-NFC menjadi terminal *tap-to-pay* lewat
+MineSec Headless SDK. Pelanggan menempelkan kartu atau ponselnya, dan SDK melaporkan setiap
+tahap sampai transaksi selesai.
+
+**Tersedia di:** `AIPosSDK` (`aipos-sdk`) dan `PaymentClient` (`aipos-payment`). **Android saja.**
+
+## Sebelum mulai
+
+- [ ] Repository dan kredensial MineSec terdaftar — [Instalasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation#repository-minesec-pembayaran-kartu)
+- [ ] `AiPosAndroid.initPlatform(...)` dipanggil di `Application.onCreate` — [Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/android#1-initplatform-di-applicationoncreate)
+- [ ] `AiPosAndroid.attachActivity(this)` dipanggil di `onCreate` Activity — [Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/android#2-attachactivity-di-oncreate)
+- [ ] File lisensi ada di `src/main/assets/` dan `MerchantInfo.profileId` terisi
+
+## Memproses pembayaran
+
+`processPayment()` menagih **total keranjang saat ini** dan mengembalikan stream status
+sampai transaksi berakhir:
+
+```kotlin
+scope.launch {
+    sdk.processPayment().collect { state ->
+        when (state) {
+            PaymentState.Idle -> Unit
+            is PaymentState.WaitingTap -> show("${state.message} (${state.timeoutSeconds}s)")
+            is PaymentState.Processing -> show(state.message)
+            is PaymentState.Success -> showReceipt(state)
+            is PaymentState.Failed -> when {
+                state.isCancelled -> show("Payment cancelled")
+                state.isTimeout -> show("Timed out, please tap the card again")
+                else -> show("Failed: ${state.errorMessage}")
+            }
+        }
+    }
+}
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> WaitingTap: processPayment()
+    Idle --> Failed: keranjang kosong
+    WaitingTap --> Processing: kartu terbaca
+    WaitingTap --> Failed: batal / waktu habis
+    Processing --> Success: disetujui
+    Processing --> Failed: ditolak
+    Success --> [*]
+    Failed --> [*]
+```
+
+## Status pembayaran
+
+| State | Field | Arti |
+|---|---|---|
+| `Idle` | — | Tidak ada pembayaran berjalan |
+| `WaitingTap` | `message`, `timeoutSeconds` | Terminal siap, menunggu kartu ditempelkan |
+| `Processing` | `message`, `cardScheme` | Kartu terbaca, sedang diproses ke acquirer |
+| `Success` | `transactionId`, `amount`, `paymentMethod`, `cardScheme`, `rrn`, `approvalCode`, `posReference` | Disetujui |
+| `Failed` | `errorMessage`, `responseCode`, `isCancelled`, `isTimeout` | Gagal, ditolak, dibatalkan, atau waktu habis |
+
+`state.isTerminal` bernilai `true` untuk `Success` dan `Failed` — tanda dialog tap boleh
+ditutup.
+
+:::tip[Satu stream, banyak pengamat]
+Setiap status dari `processPayment()` juga diteruskan ke `observePaymentState()`. Bagian
+UI lain — misalnya banner di atas layar — cukup mengamati `observePaymentState()` tanpa
+ikut memanggil `processPayment()`.
+:::
+
+## Setelah pembayaran berhasil
+
+SDK otomatis:
+
+1. Menyimpan `Transaction` ke riwayat lokal.
+2. Mengosongkan keranjang.
+
+Yang tetap jadi tugas Anda: **mengurangi stok** di sistem Anda dan mencatat penjualan ke
+backend. Lihat [Katalog produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog#stok-tetap-tanggung-jawab-anda).
+
+## Membatalkan
+
+```kotlin
+scope.launch { sdk.cancelPayment() }
+```
+
+Menghentikan pembayaran yang sedang menunggu tap dan mengembalikan
+`observePaymentState()` ke `Idle`. Keranjang tidak dikosongkan.
+
+## Riwayat transaksi
+
+```kotlin
+sdk.observeTransactions(limit = 20).collect { transactions ->
+    transactions.forEach { t ->
+        println("${t.id} · ${t.amount.format()} · ${t.paymentMethod.displayName} · ${t.status}")
+    }
+}
+```
+
+| Field `Transaction` | Keterangan |
+|---|---|
+| `id` | Id transaksi dari gateway |
+| `cart` | Salinan isi keranjang saat transaksi terjadi |
+| `amount` | Jumlah yang diproses |
+| `paymentMethod` | Misalnya `Contactless(scheme = VISA, maskedPan = "**** 4242")` |
+| `status` | `APPROVED`, `DECLINED`, `CANCELLED`, `TIMEOUT`, atau `PENDING` |
+| `timestamp` | Milidetik epoch |
+| `rrn` | Retrieval Reference Number, untuk rekonsiliasi dengan acquirer |
+| `approvalCode` | Kode persetujuan dari penerbit kartu |
+| `posReference` | Referensi pesanan buatan POS |
+
+Riwayat disimpan di perangkat. Kirim transaksi ke backend Anda sendiri bila perlu
+dilaporkan atau direkonsiliasi.
+
+## Simulator
+
+Bila artifact yang Anda pakai dibangun tanpa MineSec, SDK memakai simulator:
+
+- `WaitingTap` selama 2 detik, lalu `Processing` selama ±1,2 detik, lalu **selalu** `Success`.
+- Pesan diawali `[SIMULASI]`, `transactionId` diawali `SIM-`, skema kartu acak (VISA,
+  Mastercard, JCB), dan nomor kartu `**** 4242`.
+- `initPlatform` selalu sukses dengan keterangan bahwa simulator yang dipakai.
+
+:::danger[Simulator tidak memindahkan uang]
+Pastikan build yang sampai ke kasir memakai terminal sungguhan. Lihat
+[Android — Terminal sungguhan vs simulator](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/android#terminal-sungguhan-vs-simulator).
+:::
+
+## Validasi sebelum menagih
+
+`processPayment()` langsung memancarkan `Failed` tanpa menyentuh terminal bila:
+
+| Pesan | Penyebab |
+|---|---|
+| `Keranjang masih kosong` | Belum ada barang |
+| `Total belanja harus lebih dari Rp 0` | Potongan harga menghabiskan seluruh total |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment.md -->
+
+# Pembayaran online
+
+Pembayaran online menagih isi keranjang lewat **halaman pembayaran** yang dibuka di WebView.
+Pelanggan memilih sendiri kanalnya — Virtual Account, QRIS, atau kartu — dan SDK mengikuti
+statusnya sampai lunas. Layar kasir cukup menyediakan **satu** tombol "Pembayaran Online".
+
+**Tersedia di:** `AIPosSDK` (`aipos-sdk`) dan `OnlinePaymentClient` (`aipos-payment-online`). Berjalan di Android dan iOS.
+
+:::info[Tentang `OnlinePaymentClient`]
+Artifact `aipos-payment-online` menyediakan `OnlinePaymentClient` dengan alur yang sama,
+termasuk fungsi keranjang (`addToCart` dan kawan-kawannya) sejak 0.1.1. Contoh di halaman ini
+memakai `AIPosSDK`. Padanan nama fungsinya ada di
+[Referensi OnlinePaymentClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-client).
+:::
+
+## Alurnya
+
+```mermaid
+sequenceDiagram
+    participant Kasir as Aplikasi kasir
+    participant SDK as AI POS SDK
+    participant API as Backend pembayaran
+    participant Web as WebView
+    participant Plg as Pelanggan
+
+    Kasir->>SDK: startOnlinePayment()
+    SDK->>API: POST /v1/login (bila perlu)
+    SDK->>API: POST /v1/payment-links
+    API-->>SDK: URL halaman pembayaran
+    SDK-->>Kasir: WebPaymentSession
+    Kasir->>Web: loadUrl(session.paymentUrl)
+    Kasir->>SDK: attachPaymentPageProbe(webView)
+    Plg->>Web: pilih kanal & bayar
+    Web->>API: cek status (oleh halaman)
+    SDK-->>Kasir: onlinePaymentStatus: ChoosingMethod → Pending → Success
+    Note over SDK: keranjang dikosongkan
+```
+
+## 1. Konfigurasi
+
+```kotlin
+val sdk = AIPosSDK.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .onlinePayment(
+        OnlinePaymentConfig(
+            baseUrl = "https://pay-api.tokoanda.co.id",
+            apiKey = BuildConfig.POS_BACKEND_API_KEY,
+            email = "cashier@tokoanda.co.id",
+            password = password,
+            loopbackUrlReplacement = "",
+        )
+    )
+    .android(context)
+    .build()
+```
+
+Untuk mengembangkan UI tanpa backend, pakai mode purwarupa: `OnlinePaymentConfig(baseUrl = "")`.
+Semua pilihan konfigurasi ada di [OnlinePaymentConfig](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-config).
+
+### Autentikasi
+
+SDK mengurus token sendiri:
+
+1. Menukar `email` + `password` jadi token lewat `POST {baseUrl}/v1/login`. Token disimpan
+   **di memori saja**.
+2. Setiap `POST /v1/payment-links` membawa `X-API-Key: <apiKey>` (menandai perangkat) dan
+   `Authorization: Bearer <token>` (menandai sesi).
+3. Bila token ditolak (401/403), SDK login ulang dan mengulang permintaan sekali — tanpa
+   melibatkan kasir.
+
+## 2. Buka sesi pembayaran
+
+```kotlin
+scope.launch {
+    when (val result = sdk.startOnlinePayment(note = "Table 4")) {
+        is PosResult.Success -> openPaymentPage(result.data)
+        is PosResult.Failure -> showMessage(result.message)
+    }
+}
+```
+
+`WebPaymentSession` berisi:
+
+| Field | Keterangan |
+|---|---|
+| `paymentUrl` | Alamat yang dimuat di WebView |
+| `amount` | Jumlah yang ditagihkan, untuk ditampilkan di layar kasir |
+| `orderId` | Referensi pesanan buatan POS |
+| `sessionId` | Identitas sesi di sisi penyedia |
+| `expiresAtMillis` | Batas waktu sesi, `null` bila tidak diberikan penyedia |
+
+Keranjang **belum** dikosongkan di tahap ini.
+
+## 3. Tampilkan halaman pembayaran
+
+**Android (Compose)**
+
+```kotlin
+@Composable
+fun PaymentPage(sdk: AIPosSDK, session: WebPaymentSession) {
+    val context = LocalContext.current
+
+    // Create the WebView ONCE. Recreating it on every recomposition reloads the page
+    // and throws the customer back to the start.
+    val webView = remember(session.paymentUrl) {
+        AiposPaymentWebView(context).apply {
+            webViewClient = AiposPaymentWebViewClient(sdk)
+            loadUrl(session.paymentUrl)
+        }
+    }
+
+    // REQUIRED: without the probe, the status gets stuck at ChoosingMethod.
+    LaunchedEffect(webView) { sdk.attachPaymentPageProbe(webView.paymentPageProbe()) }
+
+    DisposableEffect(webView) { onDispose { webView.destroy() } }
+
+    AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
+}
+```
+
+**Android (View)**
+
+```kotlin
+val webView = AiposPaymentWebView(context)
+webView.webViewClient = AiposPaymentWebViewClient(sdk)
+webView.loadUrl(session.paymentUrl)
+
+// REQUIRED: without the probe, the status gets stuck at ChoosingMethod.
+sdk.attachPaymentPageProbe(webView.paymentPageProbe())
+```
+
+**iOS (Swift)**
+
+```swift
+webView.navigationDelegate = self   // your own WKNavigationDelegate
+urlObservation = webView.observe(\.url) { [weak self] view, _ in
+    if let url = view.url?.absoluteString { self?.sdk.onWebViewUrlChanged(url: url) }
+}
+
+// REQUIRED: without the probe, the status gets stuck at ChoosingMethod.
+sdk.attachPaymentPageProbe(probe: IosPaymentPageProbeKt.paymentPageProbe(webView))
+
+webView.load(URLRequest(url: URL(string: session.paymentUrl)!))
+```
+
+Contoh `WKNavigationDelegate` lengkap ada di [Integrasi iOS](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/ios#pembayaran-online-di-wkwebview).
+
+### Kenapa `attachPaymentPageProbe` wajib
+
+Halaman pembayaran berpindah dari pilih-metode → menunggu → lunas **tanpa mengubah
+alamatnya**. Memantau navigasi WebView saja tidak pernah melihat perpindahan itu. *Page
+probe* membaca jawaban status yang diambil halaman dari servernya sendiri, sekitar sekali
+per detik. Panggil setelah WebView dibuat, dan panggil lagi bila WebView dibuat ulang.
+
+### Kenapa `AiposPaymentWebView`
+
+- JavaScript dan DOM storage sudah menyala — halaman pembayaran tidak tampil tanpa keduanya.
+- Halaman diperkecil agar muat selebar layar, tanpa geser kiri-kanan.
+- Guliran tetap milik halaman walau WebView ada di dalam `ModalBottomSheet`. Tanpa ini,
+  menggulir terbaca sebagai menggeser sheet, dan pelanggan tidak pernah sampai ke tombol bayar.
+
+Konsekuensinya, geser-ke-bawah di atas halaman pembayaran tidak menutup sheet. Sediakan
+tombol tutup di luar area WebView.
+
+Bila Anda harus memakai `WebView` biasa (layar penuh, bukan sheet), panggil
+`webView.prepareForAiposPayment()` sebelum memuat URL.
+
+## 4. Ikuti statusnya
+
+```kotlin
+sdk.onlinePaymentStatus.collect { status ->
+    when (status) {
+        WebPaymentStatus.Idle -> Unit
+        WebPaymentStatus.ChoosingMethod -> showHint("Customer is choosing a method…")
+        is WebPaymentStatus.Pending -> showHint("Waiting for payment…")
+        is WebPaymentStatus.Success -> onDone(status.transactionId)
+        is WebPaymentStatus.Failed -> onFailed(status.rawStatus)
+        is WebPaymentStatus.Cancelled -> closePage()
+        is WebPaymentStatus.Unknown -> log("Unrecognized status: ${status.rawStatus}")
+    }
+}
+```
+
+`onlinePaymentStatus` adalah `StateFlow` — selalu punya nilai, jadi layar bisa langsung
+menggambar.
+
+| Status | Arti | `isFinal` |
+|---|---|:---:|
+| `Idle` | Tidak ada sesi berjalan | |
+| `ChoosingMethod` | Halaman terbuka, kanal belum dipilih | |
+| `Pending(transactionId)` | Kanal dipilih, menunggu dana | |
+| `Success(transactionId)` | Halaman menyatakan dana diterima. Keranjang dikosongkan otomatis. | ✅ |
+| `Failed(transactionId, rawStatus)` | Ditolak, gagal, atau kedaluwarsa | ✅ |
+| `Cancelled(transactionId)` | Kasir menutup halaman atau penyedia membatalkan | ✅ |
+| `Unknown(transactionId, rawStatus)` | Kode status yang belum dikenal SDK. **Tidak pernah** dianggap lunas. | |
+
+Setelah status `isFinal`, WebView boleh ditutup.
+
+### Tanpa `Flow`
+
+Untuk Java, Swift, atau Native Module:
+
+```kotlin
+val registration = sdk.addOnlinePaymentListener { status -> render(status) }
+// when the screen is closed — required, so the old listener doesn't react to the next transaction
+registration.cancel()
+```
+
+## 5. Menutup atau membatalkan
+
+| Fungsi | Kapan | Efek pada keranjang |
+|---|---|---|
+| `cancelOnlinePayment()` | Kasir menutup halaman sebelum lunas | Tidak dikosongkan |
+| `resetSession()` | Mulai transaksi baru | Dikosongkan |
+
+## Verifikasi pembayaran di backend
+
+:::danger[Jangan serahkan barang hanya berdasarkan `Success`]
+`WebPaymentStatus.Success` dibaca dari halaman yang berjalan di perangkat kasir. Siapa pun
+yang mengendalikan perangkat itu secara teori bisa memalsukannya. Sebelum barang diserahkan
+atau pesanan ditandai lunas di sistem Anda, **konfirmasikan status transaksi ke backend
+Anda**, yang menerima callback langsung dari penyedia pembayaran.
+:::
+
+## Mengatur halaman pembayaran
+
+```kotlin
+OnlinePaymentConfig(
+    // ...
+    allowedPaymentMethods = setOf(OnlinePaymentChannel.VIRTUAL_ACCOUNT, OnlinePaymentChannel.QRIS),
+    appearance = PaymentLinkAppearance(
+        logoUrl = "https://tokoanda.co.id/logo.png",
+        backgroundColor = "#0f766e",
+        buttonColor = "#134e4a",
+        textMode = PaymentLinkTextMode.LIGHT,
+    ),
+    customerData = CustomerDataPolicy(
+        email = CollectCustomerField(enabled = true, required = false),
+    ),
+    adminFee = Money.fromRupiah(2_500),
+    linkExpiry = 2.hours,
+)
+```
+
+| Pengaturan | Bawaan |
+|---|---|
+| `allowedPaymentMethods` | VA, QRIS, dan kartu. Kanal ditampilkan sesuai urutan set. |
+| `appearance` | Tampilan bawaan penyedia |
+| `customerData` | Tidak meminta data pelanggan apa pun |
+| `adminFee` | Tanpa biaya admin |
+| `linkExpiry` | 24 jam |
+| `hiddenButtonLabels` | Menyembunyikan tombol "Back to merchant" / "Kembali ke merchant" di halaman sukses, supaya pelanggan tidak meninggalkan bukti pembayarannya |
+
+:::tip[Kartu punya biaya lebih tinggi]
+Biaya transaksi kartu umumnya jauh di atas VA dan QRIS. Bila toko Anda tidak ingin
+menanggungnya, keluarkan `OnlinePaymentChannel.CARD` dari `allowedPaymentMethods`.
+:::
+
+## Bila penyedia mengubah kode status
+
+SDK mengenali kode status dari penyedia lewat `PaymentStatusJsonMapping`. Bawaannya:
+
+| Kode | Status |
+|---|---|
+| `active` | `ChoosingMethod` |
+| `PNDNG`, `pending` | `Pending` |
+| `SETLD`, `settled`, `success`, `paid` | `Success` |
+| `FAILD`, `EXPRD`, `RJCTD`, `DECLN`, `failed`, `expired`, … | `Failed` |
+| `CNCLD`, `cancelled`, `canceled` | `Cancelled` |
+
+Kode yang tidak dikenal jatuh ke `Unknown(rawStatus = ...)` dan tercatat di log. Daftarkan
+kode barunya tanpa menunggu rilis SDK:
+
+```kotlin
+OnlinePaymentConfig(
+    // ...
+    statusJsonMapping = PaymentStatusJsonMapping(
+        failedValues = PaymentStatusJsonMapping.DEFAULT_FAILED_VALUES + "VOIDD",
+    ),
+)
+```
+
+## Menangani kegagalan `startOnlinePayment`
+
+`PosResult.Failure.message` aman ditampilkan ke kasir. Untuk memutuskan boleh tidaknya
+mencoba ulang, periksa kodenya:
+
+```kotlin
+val result = sdk.startOnlinePayment()
+if (result is PosResult.Failure) {
+    when (result.onlineErrorCode) {
+        OnlinePaymentErrorCode.NETWORK -> showRetryButton()
+        OnlinePaymentErrorCode.UNAUTHORIZED -> show("Device not configured. Contact admin.")
+        else -> show(result.message)
+    }
+}
+```
+
+Daftar kode lengkap ada di [Hasil & error](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/results-and-errors#onlinepaymenterrorcode).
+
+## Mode pengembangan
+
+| Mode | Konfigurasi | Perilaku |
+|---|---|---|
+| Purwarupa | `baseUrl = ""` | Tidak ada permintaan HTTP. Halaman pembayaran contoh. |
+| Beta | `OnlinePaymentConfig(apiKey = ...)` | Backend beta bersama. |
+
+Setiap kali `baseUrl` terisi — di mode beta maupun produksi — SDK versi 0.1.1 mengirim
+permintaan **pelunasan tiruan** ke `POST {baseUrl}/v1/transactions/simulate-paid` sekitar tiga
+detik setelah status `Pending`, supaya alur uji bisa sampai lunas tanpa uang sungguhan. Di mode
+purwarupa tidak ada permintaan yang dikirim. Lihat
+[Siap produksi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist#pembayaran-online) untuk dampaknya di produksi.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/speech-to-text.md -->
+
+# Speech-to-text
+
+SDK sengaja tidak membawa mesin pengenal suara. Mikrofon, izin, dan siklus hidup layar
+adalah wilayah aplikasi Anda. Tugas aplikasi hanya dua: ubah suara jadi teks, lalu setor ke
+SDK.
+
+| Kejadian dari pengenal suara | Panggil |
+|---|---|
+| Hasil sementara (kalimat belum selesai) | `sdk.setInterimTranscript(teks)` |
+| Hasil final (kalimat selesai) | `sdk.pushTranscript(teks)` |
+
+## Android — `SpeechRecognizer`
+
+### Manifest
+
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+<!-- Required since Android 11: without this, isRecognitionAvailable() is always false -->
+<queries>
+    <intent>
+        <action android:name="android.speech.RecognitionService" />
+    </intent>
+</queries>
+```
+
+Minta izin `RECORD_AUDIO` saat runtime sebelum mulai mendengarkan.
+
+### Pengontrol
+
+`SpeechRecognizer` berhenti setiap kali satu ujaran selesai. Untuk mendengarkan terus-menerus,
+nyalakan ulang di `onResults` dan pada error "tidak ada suara":
+
+```kotlin
+class ConversationListener(
+    context: Context,
+    private val sdk: AIPosSDK,
+) : RecognitionListener {
+
+    private val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+    private val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+    }
+    private var isActive = false
+
+    init { recognizer.setRecognitionListener(this) }
+
+    fun start() { isActive = true; recognizer.startListening(intent) }
+
+    fun stop() { isActive = false; recognizer.stopListening() }
+
+    fun release() { isActive = false; recognizer.destroy() }
+
+    override fun onPartialResults(partialResults: Bundle) {
+        partialResults.firstText()?.let(sdk::setInterimTranscript)
+    }
+
+    override fun onResults(results: Bundle) {
+        results.firstText()?.takeIf { it.isNotBlank() }?.let(sdk::pushTranscript)
+        sdk.setInterimTranscript("")
+        if (isActive) recognizer.startListening(intent)
+    }
+
+    override fun onError(error: Int) {
+        val canRetry = error == SpeechRecognizer.ERROR_NO_MATCH ||
+            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+        if (isActive && canRetry) recognizer.startListening(intent)
+    }
+
+    private fun Bundle.firstText(): String? =
+        getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+
+    override fun onReadyForSpeech(params: Bundle?) = Unit
+    override fun onBeginningOfSpeech() = Unit
+    override fun onRmsChanged(rmsdB: Float) = Unit
+    override fun onBufferReceived(buffer: ByteArray?) = Unit
+    override fun onEndOfSpeech() = Unit
+    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+}
+```
+
+`SpeechRecognizer` wajib dibuat dan dipanggil dari thread utama.
+
+## iOS — `SFSpeechRecognizer`
+
+### Info.plist
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>The microphone is used to listen to conversations with customers.</string>
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Conversations are converted to text so the AI can suggest products.</string>
+```
+
+### Menentukan akhir kalimat
+
+`SFSpeechAudioBufferRecognitionRequest` pada mode *streaming* sering **tidak pernah**
+menandai hasil sebagai final selama audio terus mengalir. Jangan menunggu `isFinal`; anggap
+kalimat selesai setelah jeda hening singkat:
+
+```swift
+private var silenceTimer: Timer?
+private let silenceDelay: TimeInterval = 1.2
+
+func handle(_ result: SFSpeechRecognitionResult) {
+    let text = result.bestTranscription.formattedString
+    sdk.setInterimTranscript(text: text)
+
+    silenceTimer?.invalidate()
+    silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceDelay, repeats: false) { [weak self] _ in
+        guard let self, !text.isEmpty else { return }
+        self.sdk.pushTranscript(text: text)
+        self.sdk.setInterimTranscript(text: "")
+        self.restartRecognitionSession()   // the next result starts from an empty sentence
+    }
+}
+```
+
+Mulai ulang sesi pengenalan setelah setiap kalimat final. Tanpa itu, `formattedString`
+terus memanjang dan kalimat yang sama tersetor berulang kali.
+
+## Tips
+
+- **Pakai bahasa `id-ID`.** Model bahasa di SDK memahami campuran Indonesia–Inggris, tetapi
+  pengenal suara yang disetel ke bahasa lain menghasilkan transkrip yang kacau.
+- **Setor kalimat utuh, bukan kata per kata.** Hasil sementara cukup lewat
+  `setInterimTranscript`.
+- **Tidak perlu membatasi frekuensi.** SDK menunggu percakapan mereda sebelum menganalisis.
+- **Hentikan mikrofon saat layar ditutup** dan panggil `clearAdvisor()` saat pelanggan berganti.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/llm-proxy.md -->
+
+# Proxy LLM
+
+Kunci API yang dibundel ke aplikasi bisa dibongkar dari APK atau IPA. Untuk produksi,
+simpan kunci di server Anda dan biarkan aplikasi memanggil server itu.
+
+```mermaid
+flowchart LR
+    APP["Aplikasi kasir<br/>(token perangkat)"] -->|"POST /llm/v1/chat/completions"| PROXY["Proxy Anda<br/>(kunci OpenAI)"]
+    PROXY -->|"POST /v1/chat/completions"| OPENAI["OpenAI"]
+```
+
+## Konfigurasi di aplikasi
+
+```kotlin
+AIPosSDK.Builder()
+    .llmProxyBaseUrl("https://api.tokoanda.com/llm")   // without /v1
+    .llmApiKey(deviceToken)                             // optional: sent to the proxy, not to OpenAI
+    // ...
+```
+
+Bila `llmProxyBaseUrl` diisi, SDK memanggil `{llmProxyBaseUrl}/v1/chat/completions`. Nilai
+`llmApiKey` — bila ada — dikirim sebagai token `Authorization: Bearer` ke proxy, sehingga
+proxy bisa mengenali dan mencabut perangkat tertentu.
+
+## Syarat proxy
+
+Proxy harus **kompatibel dengan OpenAI Chat Completions API**:
+
+- Menerima `POST /v1/chat/completions` dengan badan permintaan format OpenAI.
+- Mendukung pemanggilan *tools* (function calling) — dipakai agent kasir.
+- Mengembalikan respons dalam format OpenAI.
+- Melayani model yang diminta SDK: **GPT-5.4 mini** (`OpenAIModels.Chat.GPT5_4Mini`). Bila proxy
+  memetakan ke model lain, pastikan model tersebut juga mendukung *tools*.
+
+Pilihan yang sudah memenuhinya:
+
+| Pilihan | Catatan |
+|---|---|
+| **LiteLLM** | Gateway siap pakai; mendukung kuota per kunci dan banyak penyedia |
+| **Azure OpenAI** | Arahkan ke endpoint yang kompatibel OpenAI |
+| **Backend sendiri** | Teruskan permintaan apa adanya ke OpenAI sambil menambahkan kunci |
+
+## Contoh proxy minimal (Node.js)
+
+```javascript
+import express from 'express';
+
+const app = express();
+app.use(express.json({ limit: '2mb' }));
+
+app.post('/llm/v1/chat/completions', async (req, res) => {
+  const token = req.get('authorization')?.replace('Bearer ', '');
+  if (!(await isDeviceAuthorized(token))) return res.status(401).json({ error: 'unauthorized' });
+
+  const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(req.body),
+  });
+
+  res.status(upstream.status).type('application/json').send(await upstream.text());
+});
+
+app.listen(8080);
+```
+
+Tambahkan di proxy Anda: batas laju per perangkat, pencatatan pemakaian, dan daftar model
+yang diizinkan.
+
+## Kesalahan umum
+
+| Gejala | Penyebab |
+|---|---|
+| 404 dari proxy | `llmProxyBaseUrl` diakhiri `/v1`, sehingga path menjadi `/v1/v1/chat/completions` |
+| Saran kosong, `observeAdvisorError()` berisi pesan 401 | Proxy menolak token perangkat |
+| Agent tidak pernah menjalankan aksi | Proxy atau model di baliknya tidak mendukung *tools* |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist.md -->
+
+# Siap produksi
+
+Periksa daftar ini sebelum aplikasi dipasang di perangkat kasir.
+
+## Keamanan kunci
+
+- [ ] **Kunci OpenAI tidak ada di aplikasi.** Pakai [`llmProxyBaseUrl`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/llm-proxy).
+- [ ] **Kata sandi backend pembayaran tidak dibundel.** `OnlinePaymentConfig.password` ikut
+      terbundel ke APK/IPA dan tidak bisa dicabut per perangkat. Ambil dari server saat
+      perangkat diaktivasi dan simpan di Android Keystore / iOS Keychain.
+- [ ] **`apiKey` pembayaran berbeda per perangkat**, supaya perangkat yang hilang bisa
+      dicabut tanpa mengganggu kasir lain.
+- [ ] Kredensial MineSec hanya ada di `~/.gradle/gradle.properties` atau secret CI.
+
+## Pembayaran kartu
+
+- [ ] Transaksi uji di build rilis **tidak** menampilkan pesan `[SIMULASI]` dan `transactionId`
+      tidak diawali `SIM-`.
+- [ ] Lisensi MineSec produksi ada di `src/main/assets/` dan namanya dioper ke `initPlatform`.
+      Jangan memakai `public-test.license`.
+- [ ] `MerchantInfo.profileId` diisi profil produksi, bukan `DEFAULT_PROFILE_ID`.
+- [ ] `terminalId` dan `mid` sesuai data dari acquirer.
+- [ ] `initPlatform` yang gagal ditampilkan ke kasir, bukan hanya dicatat di log.
+
+## Pembayaran online
+
+- [ ] `baseUrl`, `email`, `password`, dan `apiKey` menunjuk **backend produksi Anda**, bukan
+      bawaan beta.
+- [ ] `loopbackUrlReplacement = ""` — bawaannya mengarahkan alamat `localhost` ke halaman
+      purwarupa.
+- [ ] **Status lunas dikonfirmasi ke backend** sebelum barang diserahkan. `WebPaymentStatus.Success`
+      dibaca dari perangkat kasir dan belum diverifikasi server.
+- [ ] **Endpoint `POST /v1/transactions/simulate-paid` tidak aktif di backend produksi.** SDK
+      versi 0.1.1 memanggilnya sekitar tiga detik setelah status `Pending` untuk keperluan
+      uji. Bila endpoint itu ada dan menerima panggilan, transaksi bisa tercatat lunas tanpa
+      pembayaran sungguhan.
+- [ ] `allowedPaymentMethods` sesuai kanal yang benar-benar diterima toko.
+- [ ] Kode status penyedia untuk gagal dan kedaluwarsa sudah diuji. Kode yang belum dikenal
+      tampil sebagai `Unknown` — pantau log `AiPos/online-payment` di minggu pertama.
+
+## Fitur AI
+
+- [ ] Kebijakan privasi toko menyebut bahwa percakapan dikirim ke penyedia model bahasa.
+- [ ] Proxy LLM punya batas laju dan pemantauan biaya.
+- [ ] `Product.description` terisi — kualitas saran sangat bergantung padanya.
+
+## Data dan stok
+
+- [ ] Stok dikurangi di sistem Anda setelah transaksi lunas. SDK tidak pernah menguranginya.
+- [ ] Transaksi dikirim ke backend Anda. Riwayat di SDK hanya tersimpan di perangkat.
+- [ ] `resetSession()` dipanggil setiap kali pelanggan berganti.
+
+## Stabilitas
+
+- [ ] Hanya satu instance SDK per proses.
+- [ ] `close()` dipanggil saat SDK tidak dipakai lagi.
+- [ ] Setiap `PaymentListenerRegistration` dan `FlowSubscription` dibatalkan saat layar ditutup.
+- [ ] WebView pembayaran dibuat sekali per sesi (dalam `remember` di Compose).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/help/troubleshooting.md -->
+
+# Pemecahan masalah
+
+## Instalasi dan build
+
+### `Could not find com.theminesec.sdk:headless...`
+
+Repository MineSec belum terdaftar atau kredensialnya salah.
+
+1. Pastikan `MINESEC_REGISTRY_LOGIN` dan `MINESEC_REGISTRY_TOKEN` ada di
+   `~/.gradle/gradle.properties`.
+2. Pastikan blok `maven { url = uri("https://maven.pkg.github.com/theminesec/ms-registry-client") }`
+   ada di `settings.gradle.kts` — lihat [Instalasi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/installation#repository-minesec-pembayaran-kartu).
+3. Token GitHub Packages yang kedaluwarsa juga menghasilkan pesan ini. Minta token baru ke MineSec.
+
+### `Dependency ... requires compileSdk 36`
+
+Naikkan `compileSdk` modul aplikasi ke 36.
+
+### `Manifest merger failed: uses-sdk:minSdkVersion 24 cannot be smaller than version 26`
+
+SDK membutuhkan `minSdk = 26`.
+
+### Crash `JNI DETECTED ERROR ... SimpleLoggerFactory`
+
+Ada dua backend SLF4J di classpath: `slf4j-simple` dan `logback-android` (dibawa MineSec).
+Kode native MineSec mewajibkan logback. Cari siapa yang membawa `slf4j-simple`:
+
+```bash
+./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep slf4j-simple
+```
+
+Lalu buang dari aplikasi Anda:
+
+```kotlin
+configurations.configureEach {
+    exclude(group = "org.slf4j", module = "slf4j-simple")
+}
+```
+
+### Log `No SLF4J providers were found`
+
+Bukan error. Aplikasi yang tidak memakai MineSec tidak punya backend logging SLF4J, jadi log
+internal tidak ditampilkan. Pasang backend sendiri bila perlu, misalnya
+`com.github.tony19:logback-android`.
+
+### Link iOS gagal dengan simbol `std::` tidak ditemukan
+
+Tambahkan `-lc++` ke `OTHER_LDFLAGS`. Lihat [Integrasi iOS](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/platform/ios#b-swift-package-manager-untuk-aplikasi-swift).
+
+## Inisialisasi
+
+### `IllegalArgumentException` saat `build()`
+
+Baca pesannya — setiap pesan menyebut metode builder yang belum dipanggil. Daftar lengkap
+ada di [Hasil & error](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/results-and-errors#builder).
+
+### Aplikasi menggantung saat menambah ke keranjang
+
+`ProductCatalogSource` Anda tidak pernah memancarkan nilai. Flow wajib memancarkan nilai
+pertama segera — lihat [Katalog produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog#pilihan-2-implementasi-sendiri).
+
+## Pembayaran kartu
+
+| Gejala | Penyebab | Solusi |
+|---|---|---|
+| `PaymentActivityBridge belum di-attach` | `attachActivity` tidak dipanggil, atau dipanggil di `onResume` | Panggil `AiPosAndroid.attachActivity(this)` di `onCreate`, sebelum `setContent` |
+| Pembayaran selalu sukses dalam ±3 detik, pesan `[SIMULASI]` | Artifact yang terpasang adalah varian simulator | Pakai artifact yang dibangun dengan MineSec |
+| `Profile ID MineSec belum diatur` | `MerchantInfo.profileId` kosong | Isi dari dashboard MineSec |
+| `HeadlessActivity must be declared with android:launchMode=singleTask` | Manifest aplikasi menimpa deklarasi Activity SDK | Hapus `tools:replace` untuk `AIPosHeadlessActivity` |
+| `initPlatform` gagal soal lisensi | File lisensi tidak ada di `src/main/assets/` atau namanya berbeda | Periksa nama yang dioper ke `licenseName` |
+| `Pembayaran contactless belum didukung di iOS` | Dipanggil di iOS | Pakai pembayaran online di iOS |
+
+## Pembayaran online
+
+Saring log terlebih dahulu — banyak masalah langsung terlihat dari sana:
+
+```bash
+adb logcat | grep AiPos/online-payment
+```
+
+| Gejala | Penyebab | Solusi |
+|---|---|---|
+| Status diam di `ChoosingMethod` | `attachPaymentPageProbe` belum dipanggil | Panggil `sdk.attachPaymentPageProbe(webView.paymentPageProbe())` setelah WebView dibuat |
+| Log: *"tidak ada satu pun respons halaman tersadap"* | Probe terpasang ke WebView yang salah, atau halaman memakai Service Worker / iframe lintas-origin / WebSocket | Pastikan probe dari WebView yang sama yang memuat `paymentUrl` |
+| Payload tersadap tetapi status `Unknown(rawStatus = ...)` | Penyedia memakai kode status baru | Tambahkan kodenya ke `statusJsonMapping` — lihat [Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment#bila-penyedia-mengubah-kode-status) |
+| Endpoint status terlihat di network tab tetapi diabaikan | Alamatnya tidak memuat penggal yang dikenal | Tambahkan penggalnya ke `statusJsonMapping.statusUrlFragments` |
+| Tidak ada permintaan ke `/v1/payment-links` | `baseUrl` kosong → mode purwarupa | Isi `baseUrl`; log saat SDK dirakit menyebut mode yang aktif |
+| *"Kredensial login pembayaran belum diisi"* | `email` atau `password` kosong | Isi keduanya |
+| *"Login pembayaran ditolak server"* | Email/kata sandi salah, atau `baseUrl` salah sehingga `/v1/login` menjawab 404 | Periksa email yang tercetak di log mode, lalu kredensialnya |
+| *"Akses pembayaran ditolak walau sudah login ulang"* | Token sudah segar; masalahnya di `apiKey` atau izin akun | Periksa `apiKey` dan peran akun di backend |
+| Halaman putih/kosong | JavaScript WebView mati | Pakai `AiposPaymentWebView`, atau panggil `prepareForAiposPayment()` |
+| Halaman gagal dimuat, alamat berisi `localhost` | Backend menjawab alamat loopback | Isi `loopbackUrlReplacement` (beta), atau perbaiki `public_url` di backend (produksi) |
+| Halaman termuat ulang setiap status berubah | WebView dibuat ulang tiap rekomposisi | Bungkus pembuatan WebView dalam `remember` |
+| Halaman tidak bisa digulir di bottom sheet | Gesture sheet menelan sentuhan | Pakai `AiposPaymentWebView` |
+| `startOnlinePayment` gagal *"Keranjang masih kosong"* padahal pakai `OnlinePaymentClient` | Keranjang belum diisi sebelum sesi dibuka | Panggil `addToCart(...)` dulu — tersedia di `OnlinePaymentClient` sejak 0.1.1 |
+| Di iOS, perpindahan halaman tidak terdeteksi | `WKWebView` tidak memanggil delegate untuk `history.pushState` | Tambahkan KVO pada `webView.url` |
+
+## Fitur AI
+
+| Gejala | Penyebab | Solusi |
+|---|---|---|
+| Saran tidak pernah muncul | `pushTranscript` tidak pernah dipanggil, atau hanya `setInterimTranscript` | Setor kalimat final lewat `pushTranscript` |
+| `observeAdvisorError()` berisi pesan 401 | Kunci OpenAI atau token proxy salah | Periksa `llmApiKey` / proxy |
+| 404 dari proxy | `llmProxyBaseUrl` diakhiri `/v1` | Hapus `/v1` |
+| Saran selalu kosong padahal ada produk cocok | Model menyebut produk yang tidak persis ada di katalog, lalu dibuang | Lengkapi `name` dan `description` produk |
+| Saran mengarah ke pelanggan sebelumnya | Transkrip lama belum dibersihkan | Panggil `clearAdvisor()` atau `resetSession()` saat pelanggan berganti |
+| Di iOS, saran tidak pernah dianalisis | Pengenal suara tidak pernah memberi hasil final | Tentukan akhir kalimat dengan jeda hening — lihat [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/speech-to-text#menentukan-akhir-kalimat) |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/help/faq.md -->
+
+# FAQ
+
+## Umum
+
+### Apakah SDK menyediakan tampilan siap pakai?
+
+Tidak. SDK hanya menyediakan logika, data, dan alur transaksi. Seluruh tampilan milik aplikasi
+Anda, sehingga desainnya bisa mengikuti merek toko.
+
+### Apakah saya harus memakai semua fitur?
+
+Tidak. Pilih artifact sesuai kebutuhan — lihat [Memilih artifact](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/choosing-artifacts).
+
+### Apakah SDK bisa berjalan tanpa internet?
+
+Keranjang dan pembayaran kartu tidak membutuhkan internet dari sisi SDK (terminal MineSec
+punya kebutuhan jaringannya sendiri). Penyaran produk, agent kasir, dan pembayaran online
+membutuhkan internet.
+
+### Apakah SDK bentrok dengan Koin atau Hilt di aplikasi saya?
+
+Tidak. SDK memakai container Koin miliknya sendiri, bukan `startKoin` global.
+
+## Data
+
+### Di mana data keranjang dan transaksi disimpan?
+
+Di penyimpanan lokal perangkat (`SharedPreferences` di Android, `NSUserDefaults` di iOS).
+Keranjang bertahan saat aplikasi ditutup. SDK tidak mengirim transaksi ke server mana pun —
+kirim sendiri ke backend Anda bila perlu.
+
+### Apakah SDK mengurangi stok setelah transaksi?
+
+Tidak. SDK hanya memvalidasi terhadap angka `stock` yang Anda berikan. Lihat
+[Katalog produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/catalog#stok-tetap-tanggung-jawab-anda).
+
+### Mata uang apa yang didukung?
+
+Rupiah. `Money.format()` menghasilkan `"Rp 25.000"`, dan pembayaran online hanya menerima
+nominal Rupiah bulat.
+
+## Fitur AI
+
+### Model bahasa apa yang dipakai?
+
+OpenAI GPT-5.4 mini, lewat API OpenAI langsung atau proxy yang kompatibel.
+
+### Data apa yang dikirim ke penyedia model bahasa?
+
+Untuk penyaran produk: transkrip percakapan dan data katalog (nama, kategori, harga,
+deskripsi, stok). Untuk agent kasir: pesan kasir, hasil pencarian produk, dan isi keranjang.
+Tidak ada data kartu pembayaran yang dikirim.
+
+### Bahasa apa yang dipahami?
+
+Bahasa Indonesia, termasuk campuran Indonesia–Inggris yang lazim di toko. Jawaban dan alasan
+saran ditulis dalam Bahasa Indonesia.
+
+### Apakah SDK merekam suara?
+
+Tidak. SDK tidak pernah mengakses mikrofon. Aplikasi Anda yang merekam dan mengubahnya
+jadi teks.
+
+## Pembayaran
+
+### Kartu apa saja yang diterima terminal?
+
+Visa, Mastercard, American Express, JCB, Maestro, dan UnionPay — bergantung pada konfigurasi
+acquiring di profil MineSec Anda.
+
+### Bisakah iPhone menerima pembayaran kartu?
+
+Belum. Lihat [Pengenalan](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guide/introduction#dukungan-platform). Gunakan pembayaran online di iOS.
+
+### Bagaimana cara mencoba pembayaran tanpa uang sungguhan?
+
+- **Kartu:** varian simulator menyetujui setiap transaksi.
+- **Online:** mode purwarupa (`baseUrl = ""`) atau lingkungan beta bawaan.
+
+### Kenapa saya harus memverifikasi pembayaran online ke backend?
+
+Status lunas dibaca dari halaman pembayaran di perangkat kasir, bukan dari server. Lihat
+[Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment#verifikasi-pembayaran-di-backend).
+
+### Bisakah kasir memilih kanal (VA atau QRIS) sebelum halaman dibuka?
+
+Tidak perlu. Pelanggan memilih sendiri di halaman pembayaran. Anda hanya bisa membatasi kanal
+yang tersedia lewat `allowedPaymentMethods`.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/help/changelog.md -->
+
+# Catatan rilis
+
+Semua artifact `com.weekendinc.aipos:*` dirilis bersamaan pada satu nomor versi.
+
+## 0.1.1
+
+### Fitur
+
+- **`OnlinePaymentClient` punya fungsi keranjang sendiri** — `observeCatalog`, `observeCart`,
+  `addToCart`, `removeFromCart`, `updateCartQuantity`, `clearCart`. API-nya sama dengan
+  `PaymentClient`, sehingga `aipos-payment-online` kini bisa dipakai berdiri sendiri tanpa
+  `AIPosSDK`.
+
+## 0.1.0
+
+Rilis pertama.
+
+### Fitur
+
+- **Penyaran produk** — `AdvisorClient` dan `AIPosSDK.pushTranscript` / `observeSuggestions`.
+- **Agent kasir** — `AIPosSDK.sendMessage` dengan aksi pencarian produk, keranjang, pembayaran
+  kartu, struk, dan riwayat transaksi.
+- **Keranjang** dengan validasi stok dan penyimpanan lokal.
+- **Pembayaran kartu contactless** di Android lewat MineSec Headless SDK 1.3, dengan simulator
+  bawaan.
+- **Pembayaran online** — Virtual Account, QRIS, dan kartu lewat halaman pembayaran di WebView,
+  dengan pembacaan status otomatis (`attachPaymentPageProbe`), login token otomatis, dan
+  pemetaan kode status yang dapat disetel.
+- **Kotlin Multiplatform** — Android dan iOS (`iosArm64`, `iosSimulatorArm64`, `iosX64`), dengan
+  fungsi jembatan Swift.
+
+### Batasan yang diketahui
+
+- Pembayaran kartu contactless belum didukung di iOS.
+- `OnlinePaymentClient` belum menyediakan fungsi keranjang; gunakan `AIPosSDK` untuk pembayaran
+  online. *(Diselesaikan di 0.1.1.)*
+- Status lunas pembayaran online belum diverifikasi ke server oleh SDK.
+- SDK memanggil `POST /v1/transactions/simulate-paid` sekitar tiga detik setelah status
+  `Pending` bila `baseUrl` terisi.
+- Kode status penyedia untuk gagal, kedaluwarsa, dan batal belum terverifikasi di lapangan;
+  kode yang tidak dikenal tampil sebagai `WebPaymentStatus.Unknown`.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference.md -->
+
+# Referensi API
+
+Referensi seluruh API publik AI POS SDK versi 0.1.1.
+
+## Titik masuk
+
+| Kelas | Artifact | Paket | Kegunaan |
+|---|---|---|---|
+| [`AIPosSDK`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-sdk) | `aipos-sdk` | `com.weekendinc.aipos` | Semua fitur dalam satu objek |
+| [`AdvisorClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/advisor-client) | `aipos-advisor` | `com.weekendinc.aipos.advisor` | Penyaran produk saja |
+| [`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/payment-client) | `aipos-payment` | `com.weekendinc.aipos.payment` | Keranjang + pembayaran kartu |
+| [`OnlinePaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-client) | `aipos-payment-online` | `com.weekendinc.aipos.payment.online` | Pembayaran online |
+| [`AiPosAndroid`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-android) | `aipos-payment` | `com.weekendinc.aipos` | Inisialisasi terminal di Android |
+
+## Konfigurasi dan model
+
+| Halaman | Isi |
+|---|---|
+| [`OnlinePaymentConfig`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-config) | Semua parameter pembayaran online |
+| [Model data](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/models) | `Product`, `Money`, `Cart`, `MerchantInfo`, `PaymentState`, `WebPaymentStatus`, dan lainnya |
+| [Hasil & error](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/results-and-errors) | `PosResult`, `OnlinePaymentErrorCode`, pesan kegagalan |
+| [Jembatan Swift](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/swift-bridge) | Fungsi pembantu khusus iOS |
+
+## Konvensi
+
+- **`suspend`** — panggil dari coroutine. Di Swift muncul sebagai `async throws`.
+- **`Flow<T>`** — stream nilai. Di Swift, amati lewat `FlowSubscriptionKt.subscribe`.
+- **`PosResult<T>`** — operasi yang bisa gagal tidak melempar exception; kegagalannya
+  dikembalikan sebagai `PosResult.Failure` dengan pesan yang aman ditampilkan.
+- **`IllegalArgumentException`** hanya dilempar oleh `Builder.build()` saat konfigurasi wajib
+  belum lengkap.
+
+## Import yang sering dipakai
+
+```kotlin
+import com.weekendinc.aipos.AIPosSDK
+import com.weekendinc.aipos.AiPosAndroid
+import com.weekendinc.aipos.android                         // extension Builder.android(context)
+import com.weekendinc.aipos.domain.catalog.MutableProductCatalog
+import com.weekendinc.aipos.domain.catalog.ProductCatalogSource
+import com.weekendinc.aipos.domain.common.PosResult
+import com.weekendinc.aipos.domain.entity.Cart
+import com.weekendinc.aipos.domain.entity.MerchantInfo
+import com.weekendinc.aipos.domain.entity.Product
+import com.weekendinc.aipos.domain.entity.WebPaymentStatus
+import com.weekendinc.aipos.domain.model.PaymentState
+import com.weekendinc.aipos.domain.valueobject.Money
+import com.weekendinc.aipos.domain.valueobject.ProductId
+import com.weekendinc.aipos.payment.online.AiposPaymentWebView
+import com.weekendinc.aipos.payment.online.AiposPaymentWebViewClient
+import com.weekendinc.aipos.payment.online.OnlinePaymentConfig
+import com.weekendinc.aipos.payment.online.paymentPageProbe
+```
+
+:::warning[API internal]
+Deklarasi bertanda `@InternalAiPosApi` dipakai antar-modul SDK dan bukan bagian dari API
+publik. Kompilator menolak pemakaiannya dari aplikasi Anda, dan bentuknya bisa berubah
+tanpa pemberitahuan.
+:::
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-sdk.md -->
+
+# AIPosSDK
+
+```kotlin
+class AIPosSDK : WebPaymentUrlListener
+```
+
+Titik masuk tunggal untuk semua fitur. Artifact: `com.weekendinc.aipos:aipos-sdk`.
+
+## Builder
+
+```kotlin
+val sdk = AIPosSDK.Builder()
+    .llmApiKey(key)                 // or .llmProxyBaseUrl(url)
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .onlinePayment(config)          // optional
+    .android(context)               // or .ios()
+    .build()
+```
+
+| Metode | Wajib | Keterangan |
+|---|---|---|
+| `llmApiKey(key: String)` | salah satu | Kunci OpenAI langsung. Untuk pengembangan. Bila proxy juga diisi, dikirim sebagai token ke proxy. |
+| `llmProxyBaseUrl(url: String)` | salah satu | Endpoint kompatibel OpenAI, **tanpa** `/v1`. Didahulukan bila keduanya diisi. |
+| `merchantInfo(info: MerchantInfo)` | ya | Identitas merchant. |
+| `productCatalog(source: ProductCatalogSource)` | ya | Sumber katalog produk. |
+| `onlinePayment(config: OnlinePaymentConfig)` | tidak | Bawaan: `OnlinePaymentConfig()` (lingkungan beta). |
+| `android(context: Context)` | ya (Android) | Extension di `com.weekendinc.aipos`. |
+| `ios()` | ya (iOS) | Extension di `com.weekendinc.aipos`. |
+| `build(): AIPosSDK` | — | Melempar `IllegalArgumentException` bila konfigurasi wajib belum lengkap. |
+
+## Katalog
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `observeCatalog()` | `Flow<List<Product>>` | Isi katalog dari `productCatalog(...)`. |
+
+## Penyaran produk
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `pushTranscript(text: String)` | `Unit` | Setor satu kalimat final. Aman dipanggil sesering apa pun. |
+| `setInterimTranscript(text: String)` | `Unit` | Potongan kalimat yang masih dikenali. |
+| `requestSuggestions()` | `Unit` | Analisis sekarang, tanpa menunggu percakapan mereda. |
+| `clearAdvisor()` | `Unit` | Kosongkan transkrip dan saran. Keranjang tidak disentuh. |
+| `observeSuggestions()` | `Flow<List<ProductSuggestion>>` | Saran terbaru, urut dari yang paling relevan. |
+| `observeBuyerIntent()` | `Flow<String>` | Ringkasan kebutuhan pelanggan. |
+| `observeAdvisorState()` | `Flow<AdvisorState>` | `Idle`, `Thinking`, `Suggesting`. |
+| `observeTranscript()` | `Flow<List<String>>` | Semua kalimat yang sudah disetor. |
+| `observeInterimTranscript()` | `Flow<String>` | Potongan kalimat terakhir. |
+| `observeAdvisorError()` | `Flow<String?>` | Kegagalan terakhir; `null` bila tidak ada. |
+
+## Agent kasir
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `suspend sendMessage(message: String)` | `String` | Kirim perintah; kembali setelah agent selesai. |
+| `observeMessages()` | `Flow<List<AgentMessage>>` | Riwayat percakapan. |
+| `observeProcessing()` | `Flow<Boolean>` | `true` selama agent memproses pesan. |
+
+## Keranjang
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `observeCart()` | `Flow<Cart>` | Isi keranjang. |
+| `suspend addToCart(productId: ProductId, quantity: Int = 1)` | `PosResult<Cart>` | Tambah dengan validasi stok. |
+| `suspend updateCartQuantity(productId: ProductId, quantity: Int)` | `PosResult<Cart>` | Jumlah ≤ 0 menghapus baris. |
+| `suspend removeFromCart(productId: ProductId)` | `PosResult<Cart>` | Hapus baris. |
+| `suspend clearCart()` | `Unit` | Kosongkan keranjang. |
+
+## Pembayaran kartu
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `processPayment()` | `Flow<PaymentState>` | Tagih total keranjang. Stream berakhir di `Success` atau `Failed`. |
+| `suspend cancelPayment()` | `Unit` | Batalkan pembayaran yang menunggu tap. |
+| `observePaymentState()` | `Flow<PaymentState>` | Status terkini, termasuk pembayaran yang dijalankan agent. |
+| `observeTransactions(limit: Int = 20)` | `Flow<List<Transaction>>` | Riwayat transaksi di perangkat. |
+
+## Pembayaran online
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `onlinePaymentStatus` | `StateFlow<WebPaymentStatus>` | Status sesi yang berjalan; `Idle` bila tidak ada. |
+| `suspend startOnlinePayment(note: String? = null)` | `PosResult<WebPaymentSession>` | Buka sesi untuk isi keranjang. |
+| `attachPaymentPageProbe(probe: PaymentPageProbe)` | `Unit` | **Wajib.** Sambungkan WebView yang memuat halaman pembayaran. |
+| `onWebViewUrlChanged(url: String)` | `Unit` | Laporkan URL WebView. Sudah dilakukan `AiposPaymentWebViewClient`. |
+| `onWebViewLoadFailed(reason: String)` | `Unit` | Laporkan halaman gagal dimuat. |
+| `addOnlinePaymentListener(onStatus: PaymentStatusListener)` | `PaymentListenerRegistration` | Callback alternatif `Flow`. Batalkan dengan `cancel()`. |
+| `cancelOnlinePayment()` | `Unit` | Batalkan sesi. Keranjang tidak dikosongkan. |
+
+## Siklus hidup
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `suspend resetSession()` | `Unit` | Kosongkan percakapan, saran, keranjang, status pembayaran, dan sesi online. |
+| `suspend close()` | `Unit` | Lepaskan semua sumber daya. Instance tidak boleh dipakai lagi. |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/advisor-client.md -->
+
+# AdvisorClient
+
+```kotlin
+class AdvisorClient
+```
+
+Penyaran produk tanpa fitur lain. Artifact: `com.weekendinc.aipos:aipos-advisor`.
+Paket: `com.weekendinc.aipos.advisor`.
+
+Tidak membawa MineSec, izin NFC, maupun agent kasir. Tidak punya keranjang.
+
+## Builder
+
+```kotlin
+val advisor = AdvisorClient.Builder()
+    .llmApiKey(key)            // or .llmProxyBaseUrl(url)
+    .productCatalog(catalog)
+    .build()
+```
+
+| Metode | Wajib | Keterangan |
+|---|---|---|
+| `llmApiKey(key: String)` | salah satu | Kunci OpenAI langsung. |
+| `llmProxyBaseUrl(url: String)` | salah satu | Endpoint kompatibel OpenAI, tanpa `/v1`. |
+| `productCatalog(source: ProductCatalogSource)` | ya | Hanya produk di sini yang boleh disarankan. |
+| `build(): AdvisorClient` | — | Tidak membutuhkan `Context` atau platform. |
+
+## Anggota
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `pushTranscript(text: String)` | `Unit` | Setor satu kalimat final. |
+| `setInterimTranscript(text: String)` | `Unit` | Potongan kalimat yang masih dikenali. |
+| `requestSuggestions()` | `Unit` | Analisis sekarang. |
+| `observeSuggestions()` | `Flow<List<ProductSuggestion>>` | Saran terbaru. |
+| `observeBuyerIntent()` | `Flow<String>` | Ringkasan kebutuhan pelanggan. |
+| `observeAdvisorState()` | `Flow<AdvisorState>` | `Idle`, `Thinking`, `Suggesting`. |
+| `observeTranscript()` | `Flow<List<String>>` | Semua kalimat yang sudah disetor. |
+| `observeInterimTranscript()` | `Flow<String>` | Potongan kalimat terakhir. |
+| `observeAdvisorError()` | `Flow<String?>` | Kegagalan terakhir. |
+| `observeCatalog()` | `Flow<List<Product>>` | Isi katalog. |
+| `clear()` | `Unit` | Kosongkan transkrip dan saran. |
+| `close()` | `Unit` | Lepaskan sumber daya. Bukan fungsi `suspend`. |
+
+Lihat panduan lengkap di [Penyaran produk](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/advisor).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/payment-client.md -->
+
+# PaymentClient
+
+```kotlin
+class PaymentClient
+```
+
+Keranjang dan pembayaran kartu tanpa fitur AI. Artifact: `com.weekendinc.aipos:aipos-payment`.
+Paket: `com.weekendinc.aipos.payment`.
+
+Tidak membawa klien OpenAI maupun izin internet.
+
+## Builder
+
+```kotlin
+val payment = PaymentClient.Builder()
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .android(context)          // or .ios()
+    .build()
+```
+
+| Metode | Wajib | Keterangan |
+|---|---|---|
+| `merchantInfo(info: MerchantInfo)` | ya | Identitas merchant. |
+| `productCatalog(source: ProductCatalogSource)` | ya | Stok keranjang divalidasi terhadap katalog ini. |
+| `android(context: Context)` | ya (Android) | Extension di `com.weekendinc.aipos.payment`. |
+| `ios()` | ya (iOS) | Extension di `com.weekendinc.aipos.payment`. Pembayaran kartu tidak didukung di iOS. |
+| `build(): PaymentClient` | — | Melempar `IllegalArgumentException` bila konfigurasi wajib belum lengkap. |
+
+Di Android, [`AiPosAndroid.initPlatform`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-android) dan
+`AiPosAndroid.attachActivity` tetap wajib dipanggil.
+
+## Anggota
+
+| Anggota | Tipe | Keterangan |
+|---|---|---|
+| `observeCatalog()` | `Flow<List<Product>>` | Isi katalog. |
+| `observeCart()` | `Flow<Cart>` | Isi keranjang. |
+| `suspend addToCart(productId: ProductId, quantity: Int = 1)` | `PosResult<Cart>` | Tambah dengan validasi stok. |
+| `suspend updateCartQuantity(productId: ProductId, quantity: Int)` | `PosResult<Cart>` | Jumlah ≤ 0 menghapus baris. |
+| `suspend removeFromCart(productId: ProductId)` | `PosResult<Cart>` | Hapus baris. |
+| `suspend clearCart()` | `Unit` | Kosongkan keranjang. |
+| `processPayment()` | `Flow<PaymentState>` | Tagih total keranjang. |
+| `suspend cancelPayment()` | `Unit` | Batalkan pembayaran yang menunggu tap. |
+| `observePaymentState()` | `Flow<PaymentState>` | Status pembayaran terkini. |
+| `observeTransactions(limit: Int = 20)` | `Flow<List<Transaction>>` | Riwayat transaksi. |
+| `close()` | `Unit` | Lepaskan sumber daya. |
+
+Lihat panduan lengkap di [Pembayaran kartu](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/card-payment).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-client.md -->
+
+# OnlinePaymentClient
+
+```kotlin
+class OnlinePaymentClient : WebPaymentUrlListener
+```
+
+Keranjang dan pembayaran online tanpa terminal dan tanpa fitur AI. Artifact:
+`com.weekendinc.aipos:aipos-payment-online`. Paket: `com.weekendinc.aipos.payment.online`.
+
+## Builder
+
+```kotlin
+val online = OnlinePaymentClient.Builder()
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .config(OnlinePaymentConfig(apiKey = key))   // optional
+    .android(context)                             // or .ios()
+    .build()
+```
+
+| Metode | Wajib | Keterangan |
+|---|---|---|
+| `merchantInfo(info: MerchantInfo)` | ya | Identitas merchant. |
+| `productCatalog(source: ProductCatalogSource)` | ya | Harga dan stok yang ditagihkan. |
+| `config(config: OnlinePaymentConfig)` | tidak | Bawaan: `OnlinePaymentConfig()` (lingkungan beta). |
+| `android(context: Context)` | ya (Android) | Extension di `com.weekendinc.aipos.payment.online`. |
+| `ios()` | ya (iOS) | Extension di `com.weekendinc.aipos.payment.online`. |
+| `build(): OnlinePaymentClient` | — | Melempar `IllegalArgumentException` bila konfigurasi wajib belum lengkap. |
+
+## Anggota
+
+| Anggota | Padanan di `AIPosSDK` | Tipe |
+|---|---|---|
+| `observeCatalog()` | sama | `Flow<List<Product>>` |
+| `observeCart()` | sama | `Flow<Cart>` |
+| `suspend addToCart(productId: ProductId, quantity: Int = 1)` | sama | `PosResult<Cart>` — validasi stok |
+| `suspend updateCartQuantity(productId: ProductId, quantity: Int)` | sama | `PosResult<Cart>` — jumlah ≤ 0 menghapus baris |
+| `suspend removeFromCart(productId: ProductId)` | sama | `PosResult<Cart>` |
+| `suspend clearCart()` | sama | `Unit` |
+| `status` | `onlinePaymentStatus` | `StateFlow<WebPaymentStatus>` |
+| `suspend startSession(note: String? = null)` | `startOnlinePayment(note)` | `PosResult<WebPaymentSession>` |
+| `attachPaymentPageProbe(probe: PaymentPageProbe)` | sama | `Unit` |
+| `onWebViewUrlChanged(url: String)` | sama | `Unit` |
+| `onWebViewLoadFailed(reason: String)` | sama | `Unit` |
+| `addStatusListener(onStatus: PaymentStatusListener)` | `addOnlinePaymentListener(onStatus)` | `PaymentListenerRegistration` |
+| `cancelSession()` | `cancelOnlinePayment()` | `Unit` |
+| `resetSession()` | — | `Unit` — kembali ke `Idle`; keranjang tidak disentuh |
+| `close()` | `close()` | `Unit` |
+
+## Adapter WebView
+
+| Deklarasi | Platform | Keterangan |
+|---|---|---|
+| `AiposPaymentWebView(context)` | Android | `WebView` yang sudah disiapkan dan tetap bisa digulir di bottom sheet |
+| `AiposPaymentWebViewClient(listener: WebPaymentUrlListener)` | Android | Meneruskan perubahan URL dan kegagalan muat ke SDK |
+| `WebView.prepareForAiposPayment()` | Android | Menyalakan JavaScript, DOM storage, dan penyesuaian viewport pada `WebView` biasa |
+| `WebView.paymentPageProbe(): PaymentPageProbe` | Android | Probe untuk `attachPaymentPageProbe` |
+| `WKWebView.paymentPageProbe(): PaymentPageProbe` | iOS | Di Swift: `IosPaymentPageProbeKt.paymentPageProbe(webView)` |
+| `AiposPaymentNavigationDelegate(listener)` | iOS (Kotlin saja) | Tidak bisa dipakai dari Swift — tulis `WKNavigationDelegate` sendiri |
+
+Lihat panduan lengkap di [Pembayaran online](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/features/online-payment).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-config.md -->
+
+# OnlinePaymentConfig
+
+```kotlin
+data class OnlinePaymentConfig(...)
+```
+
+Paket: `com.weekendinc.aipos.payment.online`. Dioper ke `AIPosSDK.Builder.onlinePayment(...)`
+atau `OnlinePaymentClient.Builder.config(...)`.
+
+Semua parameter punya nilai bawaan. Selalu gunakan **argumen bernama**.
+
+## Koneksi dan autentikasi
+
+| Parameter | Tipe | Bawaan | Keterangan |
+|---|---|---|---|
+| `baseUrl` | `String` | `DEFAULT_BASE_URL` (backend beta) | Alamat API tanpa `/` di akhir dan tanpa `/v1`. **String kosong = mode purwarupa** (tanpa HTTP). |
+| `apiKey` | `String` | `""` | Kunci perangkat, dikirim sebagai header `X-API-Key`. Satu-satunya yang tidak punya bawaan bermakna. |
+| `email` | `String` | `DEFAULT_EMAIL` (akun beta) | Akun yang ditukar jadi token lewat `POST {baseUrl}/v1/login`. |
+| `password` | `String` | `DEFAULT_PASSWORD` (akun beta) | Pasangan `email`. Ikut terbundel di aplikasi — lihat [Siap produksi](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/guides/production-checklist#keamanan-kunci). |
+| `requestTimeoutMillis` | `Long` | `10_000` | Batas waktu satu permintaan HTTP. |
+| `loopbackUrlReplacement` | `String` | `DEFAULT_LOOPBACK_URL_REPLACEMENT` (halaman purwarupa) | Skema+host pengganti bila API menjawab dengan alamat `localhost`. **Isi `""` di produksi.** |
+
+## Tagihan
+
+| Parameter | Tipe | Bawaan | Keterangan |
+|---|---|---|---|
+| `linkExpiry` | `kotlin.time.Duration` | `24.hours` | Umur tautan pembayaran sejak dibuat. |
+| `adminFee` | `Money` | `Money.ZERO` | Biaya admin di luar harga barang. Nol berarti tidak dikirim. |
+| `allowedPaymentMethods` | `Set<OnlinePaymentChannel>` | `OnlinePaymentChannel.DEFAULT` (VA, QRIS, kartu) | Kanal yang boleh dipilih pelanggan, ditampilkan sesuai urutan. |
+
+## Tampilan halaman
+
+| Parameter | Tipe | Bawaan | Keterangan |
+|---|---|---|---|
+| `appearance` | `PaymentLinkAppearance` | kosong | Logo dan warna halaman. Field kosong tidak dikirim. |
+| `customerData` | `CustomerDataPolicy` | semua mati | Data pelanggan yang diminta di halaman. |
+| `hiddenButtonLabels` | `List<String>` | `["back to merchant", "kembali ke merchant"]` | Tombol/tautan yang **memuat** teks ini disembunyikan (tidak peka huruf besar-kecil). List kosong mematikan fitur. |
+
+### `PaymentLinkAppearance`
+
+| Field | Tipe | Contoh |
+|---|---|---|
+| `logoUrl` | `String` | `"https://tokoanda.co.id/logo.png"` — harus bisa diakses publik |
+| `backgroundColor` | `String` | `"#9e086c"` |
+| `buttonColor` | `String` | `"#273395"` |
+| `textMode` | `PaymentLinkTextMode?` | `LIGHT`, `DARK`, atau `null` (bawaan penyedia) |
+
+### `CustomerDataPolicy`
+
+Berisi `name`, `email`, `phone`, dan `address`, masing-masing bertipe
+`CollectCustomerField(enabled: Boolean = false, required: Boolean = false)`.
+
+```kotlin
+customerData = CustomerDataPolicy(
+    email = CollectCustomerField(enabled = true, required = true),
+)
+```
+
+## Pemantauan status
+
+| Parameter | Tipe | Bawaan | Keterangan |
+|---|---|---|---|
+| `statusJsonMapping` | `PaymentStatusJsonMapping` | kode penyedia saat ini | Cara menerjemahkan jawaban status halaman. |
+| `pagePollIntervalMillis` | `Long` | `1_000` | Jarak antar-pembacaan halaman pembayaran. |
+| `captureWarningDelayMillis` | `Long` | `15_000` | Setelah selama ini tanpa satu pun respons terbaca, SDK menulis peringatan ke log. |
+
+### `PaymentStatusJsonMapping`
+
+| Field | Bawaan |
+|---|---|
+| `statusFieldNames` | `status`, `transaction_status`, `payment_status`, `state` |
+| `transactionIdFieldNames` | `transaction`, `transaction_id`, `transactionId`, `id` |
+| `choosingMethodValues` | `active` |
+| `pendingValues` | `PNDNG`, `pending` |
+| `successValues` | `SETLD`, `settled`, `success`, `paid` |
+| `failedValues` | `FAILD`, `EXPRD`, `RJCTD`, `DECLN`, `failed`, `failure`, `error`, `rejected`, `expired` |
+| `cancelledValues` | `CNCLD`, `cancelled`, `canceled` |
+| `statusUrlFragments` | `payment-link`, `transaction` |
+| `methodFieldNames`, `vaNumberFieldNames`, `channelValues` | Dipakai untuk pelunasan tiruan saja |
+
+Setiap nilai bawaan tersedia sebagai konstanta `DEFAULT_*` di `companion object`, sehingga
+Anda bisa menambah tanpa menulis ulang:
+
+```kotlin
+PaymentStatusJsonMapping(
+    successValues = PaymentStatusJsonMapping.DEFAULT_SUCCESS_VALUES + "CMPLT",
+)
+```
+
+Pencocokan nilai tidak peka huruf besar-kecil.
+
+## Properti turunan
+
+| Properti | Keterangan |
+|---|---|
+| `isSimulated` | `true` bila `baseUrl` kosong (mode purwarupa). |
+| `hasLoginCredentials` | `true` bila `email` dan `password` sama-sama terisi. |
+
+## Contoh produksi
+
+```kotlin
+OnlinePaymentConfig(
+    baseUrl = "https://pay-api.tokoanda.co.id",
+    apiKey = kunciPerangkat,
+    email = akun.email,
+    password = akun.password,
+    loopbackUrlReplacement = "",
+    allowedPaymentMethods = setOf(OnlinePaymentChannel.VIRTUAL_ACCOUNT, OnlinePaymentChannel.QRIS),
+    appearance = PaymentLinkAppearance(logoUrl = "https://tokoanda.co.id/logo.png"),
+)
+```
+
+Dari Swift, pakai [`onlinePaymentConfigOf`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/swift-bridge#onlinepaymentconfigof).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-android.md -->
+
+# AiPosAndroid
+
+```kotlin
+object AiPosAndroid
+```
+
+Titik integrasi khusus Android untuk terminal pembayaran. Paket: `com.weekendinc.aipos`.
+Artifact: `aipos-payment` (ikut di `aipos-sdk`).
+
+## `initPlatform`
+
+```kotlin
+suspend fun initPlatform(
+    application: Application,
+    licenseName: String = DEFAULT_LICENSE_NAME,
+): PlatformInitResult
+```
+
+Siapkan terminal pembayaran. Panggil dari `Application.onCreate`, sebelum transaksi pertama.
+
+| Parameter | Keterangan |
+|---|---|
+| `application` | Instance `Application` aplikasi Anda. |
+| `licenseName` | Nama file lisensi MineSec di `src/main/assets/`. |
+
+**Mengembalikan** `PlatformInitResult(success: Boolean, message: String)`. Pada varian
+simulator, selalu `success = true` dengan keterangan bahwa simulator yang dipakai.
+
+## `attachActivity`
+
+```kotlin
+fun attachActivity(activity: ComponentActivity)
+```
+
+Daftarkan Activity yang menampilkan layar tap kartu. **Wajib** dipanggil di `onCreate`,
+sebelum Activity mencapai status `STARTED`.
+
+## Konstanta
+
+| Konstanta | Nilai | Keterangan |
+|---|---|---|
+| `DEFAULT_LICENSE_NAME` | `"public-test.license"` | Lisensi lingkungan uji, sepasang dengan `MerchantInfo.DEFAULT_PROFILE_ID`. |
+
+## Yang ikut ter-merge ke manifest
+
+```xml
+<uses-permission android:name="android.permission.NFC" />
+
+<activity
+    android:name="com.weekendinc.aipos.payment.AIPosHeadlessActivity"
+    android:exported="false"
+    android:launchMode="singleTask"
+    android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+```
+
+Jangan mengubah `launchMode` lewat `tools:replace` — MineSec menolak transaksi bila Activity
+ini tidak `singleTask`.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/models.md -->
+
+# Model data
+
+Semua model adalah `data class` atau `sealed class` yang *immutable*.
+
+## Nilai dasar
+
+### `Money`
+
+Paket `com.weekendinc.aipos.domain.valueobject`. Uang disimpan sebagai bilangan bulat
+**sen** (1/100 Rupiah) untuk menghindari galat pembulatan.
+
+| Anggota | Keterangan |
+|---|---|
+| `Money.fromRupiah(amount: Long)` | Buat dari Rupiah penuh. `fromRupiah(25_000)` = Rp 25.000. |
+| `Money(cents: Long)` | Buat dari sen. `Money(2_500_000)` = Rp 25.000. |
+| `Money.ZERO` | Nol. |
+| `cents` | Nilai dalam sen. |
+| `whole` | Nilai dalam Rupiah penuh. |
+| `format()` | `"Rp 25.000"`. Juga dipakai `toString()`. |
+| `isNotPositive` | `true` bila nol atau negatif. |
+| `+`, `-`, `* Int`, `compareTo` | Operasi aritmetika dan perbandingan. |
+
+### `ProductId`
+
+Paket `com.weekendinc.aipos.domain.valueobject`. Membungkus `String`; tidak boleh kosong.
+
+```kotlin
+val id = ProductId("GDG-001")
+id.value   // "GDG-001"
+```
+
+## Katalog dan keranjang
+
+Paket `com.weekendinc.aipos.domain.entity`.
+
+### `Product`
+
+| Field | Tipe | Bawaan |
+|---|---|---|
+| `id` | `ProductId` | — |
+| `name` | `String` | — |
+| `price` | `Money` | — |
+| `barcode` | `String` | — |
+| `category` | `String` | — |
+| `stock` | `Int` | — |
+| `description` | `String` | `""` |
+| `imageUrl` | `String` | `""` |
+| `isAvailable` | `Boolean` (turunan) | `stock > 0` |
+
+### `Cart`
+
+| Anggota | Tipe |
+|---|---|
+| `items` | `List<CartItem>` |
+| `discount` | `Money` |
+| `subtotal` | `Money` |
+| `total` | `Money` — tidak pernah negatif |
+| `itemCount` | `Int` — total kuantitas |
+| `isEmpty` | `Boolean` |
+| `findItem(productId)` | `CartItem?` |
+
+### `CartItem`
+
+`product: Product`, `quantity: Int` (minimal 1), `subtotal: Money`.
+
+### `MerchantInfo`
+
+| Field | Tipe | Bawaan |
+|---|---|---|
+| `id` | `String` | — |
+| `name` | `String` | — |
+| `address` | `String` | — |
+| `terminalId` | `String` | — |
+| `mid` | `String` | — |
+| `profileId` | `String` | `MerchantInfo.DEFAULT_PROFILE_ID` (profil uji) |
+
+## Penyaran produk
+
+Paket `com.weekendinc.aipos.advisor`.
+
+### `ProductSuggestion`
+
+| Field | Tipe | Keterangan |
+|---|---|---|
+| `product` | `Product` | Produk utuh dari katalog |
+| `reason` | `String` | Alasan dalam Bahasa Indonesia |
+| `confidence` | `Double` | 0.0 – 1.0 |
+
+### `AdvisorState`
+
+`sealed class` dengan tiga objek: `Idle`, `Thinking`, `Suggesting`.
+
+## Agent kasir
+
+### `AgentMessage`
+
+Paket `com.weekendinc.aipos.agent.model`. Semua subtipe punya `timestamp: Long`.
+
+| Subtipe | Field |
+|---|---|
+| `UserMessage` | `content: String` |
+| `AssistantMessage` | `content: String` |
+| `ToolCall` | `toolName: String`, `summary: String` |
+| `ErrorMessage` | `message: String` |
+
+## Pembayaran kartu
+
+### `PaymentState`
+
+Paket `com.weekendinc.aipos.domain.model`.
+
+| Subtipe | Field |
+|---|---|
+| `Idle` | — |
+| `WaitingTap` | `message: String`, `timeoutSeconds: Int` |
+| `Processing` | `message: String`, `cardScheme: CardScheme` |
+| `Success` | `transactionId: String`, `amount: Money`, `paymentMethod: PaymentMethod`, `cardScheme: CardScheme`, `rrn: String?`, `approvalCode: String?`, `posReference: String?` |
+| `Failed` | `errorMessage: String`, `responseCode: String?`, `isCancelled: Boolean`, `isTimeout: Boolean` |
+
+`isTerminal: Boolean` — `true` untuk `Success` dan `Failed`.
+
+### `Transaction`
+
+Paket `com.weekendinc.aipos.domain.entity`.
+
+| Field | Tipe |
+|---|---|
+| `id` | `String` |
+| `cart` | `Cart` |
+| `amount` | `Money` |
+| `paymentMethod` | `PaymentMethod` |
+| `status` | `TransactionStatus` |
+| `timestamp` | `Long` |
+| `rrn` | `String?` |
+| `approvalCode` | `String?` |
+| `posReference` | `String?` |
+| `isApproved` | `Boolean` (turunan) |
+
+### `TransactionStatus`
+
+`PENDING`, `APPROVED`, `DECLINED`, `CANCELLED`, `TIMEOUT`.
+
+### `PaymentMethod`
+
+| Subtipe | Field | `displayName` |
+|---|---|---|
+| `Contactless` | `scheme: CardScheme`, `maskedPan: String?` | `"VISA **** 4242"` |
+| `QRCode` | `issuer: String = "QRIS"` | `"QRIS"` |
+| `Cash` | — | `"TUNAI"` |
+
+### `CardScheme`
+
+`VISA`, `MASTERCARD`, `AMEX`, `JCB`, `MAESTRO`, `UNIONPAY`, `UNKNOWN`.
+
+## Pembayaran online
+
+Paket `com.weekendinc.aipos.domain.entity`.
+
+### `WebPaymentSession`
+
+| Field | Tipe |
+|---|---|
+| `sessionId` | `String` |
+| `orderId` | `String` |
+| `paymentUrl` | `String` |
+| `amount` | `Money` |
+| `expiresAtMillis` | `Long?` |
+
+### `WebPaymentStatus`
+
+Semua subtipe punya `transactionId: String?`.
+
+| Subtipe | Field tambahan | `isFinal` |
+|---|---|:---:|
+| `Idle` | — | |
+| `ChoosingMethod` | — | |
+| `Pending` | — | |
+| `Success` | — | ✅ |
+| `Failed` | `rawStatus: String?` | ✅ |
+| `Cancelled` | — | ✅ |
+| `Unknown` | `rawStatus: String` | |
+
+### `OnlinePaymentChannel`
+
+| Nilai | `code` |
+|---|---|
+| `VIRTUAL_ACCOUNT` | `"VA"` |
+| `QRIS` | `"QR"` |
+| `CARD` | `"CARD"` |
+
+`OnlinePaymentChannel.ALL` dan `OnlinePaymentChannel.DEFAULT` — keduanya berisi ketiga kanal
+pada versi 0.1.1.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/results-and-errors.md -->
+
+# Hasil & error
+
+## `PosResult`
+
+```kotlin
+sealed class PosResult<out T> {
+    data class Success<out T>(val data: T) : PosResult<T>()
+    data class Failure(val message: String, val cause: Throwable? = null) : PosResult<Nothing>()
+}
+```
+
+Paket `com.weekendinc.aipos.domain.common`. Operasi yang bisa gagal mengembalikan
+`PosResult` alih-alih melempar exception, sehingga kemungkinan gagal terlihat di signature.
+
+| Anggota | Keterangan |
+|---|---|
+| `isSuccess` | `true` bila `Success`. |
+| `getOrNull()` | Data bila sukses, `null` bila gagal. |
+| `map { }` | Ubah data sukses; kegagalan diteruskan apa adanya. |
+| `onSuccess { data -> }` | Jalankan bila sukses. Mengembalikan hasil yang sama. |
+| `onFailure { failure -> }` | Jalankan bila gagal. Mengembalikan hasil yang sama. |
+
+`Failure.message` **aman ditampilkan** ke kasir. `Failure.cause` berisi detail teknis.
+
+```kotlin
+sdk.addToCart(id)
+    .onSuccess { cart -> updateBadge(cart.itemCount) }
+    .onFailure { failure ->
+        snackbar(failure.message)
+        Log.w("POS", "addToCart failed", failure.cause)
+    }
+```
+
+## `OnlinePaymentErrorCode`
+
+Paket `com.weekendinc.aipos.domain.error`. Tersedia pada kegagalan pembayaran online lewat
+extension `PosResult.Failure.onlineErrorCode` (`null` untuk sebab lain).
+
+| Kode | Arti | Boleh dicoba ulang? |
+|---|---|:---:|
+| `NETWORK` | Jaringan putus atau backend tidak terjangkau | ✅ |
+| `UNAUTHORIZED` | Kredensial kosong atau ditolak, termasuk setelah login ulang otomatis | ❌ perbaiki konfigurasi |
+| `INVALID_REQUEST` | Data permintaan tidak lolos validasi backend | ❌ |
+| `DUPLICATE_ORDER` | `orderId` sudah dipakai untuk tagihan berbeda | ❌ |
+| `EXPIRED` | Tagihan melewati batas waktu | buat sesi baru |
+| `PROVIDER_ERROR` | Penyedia pembayaran menolak atau bermasalah | ✅ nanti |
+| `UNKNOWN` | Sebab tidak dikenali | — |
+
+```kotlin
+import com.weekendinc.aipos.domain.error.OnlinePaymentErrorCode
+import com.weekendinc.aipos.domain.error.onlineErrorCode
+
+val result = sdk.startOnlinePayment()
+if (result is PosResult.Failure && result.onlineErrorCode == OnlinePaymentErrorCode.NETWORK) {
+    showRetryButton()
+}
+```
+
+## Pesan kegagalan umum
+
+### Keranjang
+
+| Pesan | Dari |
+|---|---|
+| `Jumlah harus lebih dari 0` | `addToCart` |
+| `Produk dengan id '<id>' tidak ditemukan` | `addToCart` |
+| `<nama> sedang habis` | `addToCart` |
+| `Stok <nama> tidak cukup. Tersedia <n>, diminta <m>` | `addToCart`, `updateCartQuantity` |
+| `Produk tidak ada di keranjang` | `updateCartQuantity`, `removeFromCart` |
+
+### Pembayaran
+
+| Pesan | Dari |
+|---|---|
+| `Keranjang masih kosong` | `processPayment` (sebagai `PaymentState.Failed`), `startOnlinePayment` |
+| `Total belanja harus lebih dari Rp 0` | `processPayment`, `startOnlinePayment` |
+| `Total belanja harus dalam Rupiah bulat` | `startOnlinePayment` |
+| `Pembayaran contactless belum didukung di iOS...` | `processPayment` di iOS |
+
+### Builder
+
+| Pesan | Penyebab |
+|---|---|
+| `MerchantInfo wajib diisi — panggil merchantInfo(...)` | `merchantInfo` belum dipanggil |
+| `Sumber katalog wajib diisi — panggil productCatalog(...)` | `productCatalog` belum dipanggil |
+| `Platform belum diatur — panggil .android(context) di Android atau .ios() di iOS` | Platform belum diatur |
+| `Salah satu dari llmApiKey(...) atau llmProxyBaseUrl(...) wajib diisi` | Kedua jalur model bahasa kosong |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/swift-bridge.md -->
+
+# Jembatan Swift
+
+Sebagian API Kotlin tidak terbawa utuh ke Swift. SDK menyediakan fungsi pembantu di source
+set iOS untuk menutup celah tersebut. Nama kelas di Swift mengikuti nama berkas Kotlin-nya
+(`NamaBerkasKt`).
+
+## `FlowSubscriptionKt.subscribe`
+
+```swift
+func subscribe(_ flow: Kotlinx_coroutines_coreFlow, onEach: @escaping (Any?) -> Void) -> FlowSubscription
+```
+
+Amati `Flow` dari Swift. Setiap nilai dikirim **di ulir utama**.
+
+```swift
+let subscription = FlowSubscriptionKt.subscribe(sdk.observeCart()) { value in
+    guard let cart = value as? Cart else { return }
+    self.cart = cart
+}
+subscription.cancel()   // required when the screen is closed
+```
+
+`FlowSubscription` punya `isActive: Bool` dan `cancel()` (aman dipanggil berkali-kali).
+
+## `IosDomainFactoryKt`
+
+### `productOf`
+
+```swift
+IosDomainFactoryKt.productOf(
+    id: String, name: String, priceRupiah: Int64,
+    barcode: String, category: String, stock: Int32,
+    description: String, imageUrl: String
+) -> Product
+```
+
+Rakit `Product` dari tipe biasa. Harga dalam **Rupiah penuh**.
+
+### `formatMoneyCents`
+
+```swift
+IosDomainFactoryKt.formatMoneyCents(cents: Int64) -> String
+```
+
+Format nilai uang dari properti seperti `cart.total` atau `product.price` (bertipe `Int64`
+berisi sen) menjadi `"Rp 13.999.000"`.
+
+### `productIdValue`
+
+```swift
+IosDomainFactoryKt.productIdValue(product: Product) -> String
+```
+
+Baca id produk sebagai `String` — misalnya untuk `Identifiable` di SwiftUI. Untuk memanggil
+`addToCart(productId:)`, oper `product.id` apa adanya.
+
+## `IosOnlinePaymentConfigFactoryKt`
+
+### `onlinePaymentConfigOf`
+
+```swift
+// Device key only; everything else uses the SDK default (beta environment)
+IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(apiKey: String) -> OnlinePaymentConfig
+
+// Full
+IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(
+    baseUrl: String, apiKey: String, email: String, password: String,
+    loopbackUrlReplacement: String
+) -> OnlinePaymentConfig
+```
+
+Parameter lain (`linkExpiry`, `appearance`, dan seterusnya) memakai nilai bawaan. Untuk
+mengubahnya, rakit `OnlinePaymentConfig` di sisi Kotlin.
+
+## `IosPaymentPageProbeKt`
+
+### `paymentPageProbe`
+
+```swift
+IosPaymentPageProbeKt.paymentPageProbe(_ webView: WKWebView) -> PaymentPageProbe
+```
+
+Probe untuk `sdk.attachPaymentPageProbe(probe:)`. Wajib agar status pembayaran online bergerak.
+
+## Tipe yang berubah bentuk
+
+| Kotlin | Swift |
+|---|---|
+| `Money` | `Int64` (sen) |
+| `ProductId` | `Any` |
+| `Flow<T>` | `Kotlinx_coroutines_coreFlow` — nilainya `Any?` |
+| `PosResult.Success<T>` | `PosResultSuccess<T>` — data di `.data` |
+| `PosResult.Failure` | `PosResultFailure` — pesan di `.message` |
+| `sealed class` objek (`AdvisorState.Idle`) | Kelas dengan inisialisasi `AdvisorState.Idle()`; bandingkan dengan `is` |
+| Konstanta companion (`MerchantInfo.DEFAULT_PROFILE_ID`) | `MerchantInfo.companion.DEFAULT_PROFILE_ID` |
+| Fungsi `suspend` | `async throws` |
+| Parameter bernilai bawaan | Wajib diisi |

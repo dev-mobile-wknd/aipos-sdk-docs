@@ -1,0 +1,40 @@
+# AI POS SDK
+
+> Kotlin Multiplatform SDK for point-of-sale apps on Android and iOS: cart, card payment on a MineSec terminal, online payment (VA/QRIS), AI product suggestions, and a cashier agent.
+
+## Guide
+
+- [Introduction](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/introduction.md): AI POS SDK is a Kotlin Multiplatform library that adds smart-cashier capabilities to your point-of-sale application.
+- [Choosing an artifact](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/choosing-artifacts.md): The SDK is split by feature.
+- [Installation](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation.md): AI POS SDK is published on Maven with the coordinates com.weekendinc.aipos:<artifact>:0.1.1.
+- [Quick start](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/quick-start.md): This guide takes you from an empty Android project to a successful first transaction — no terminal, no license, and no backend.
+- [Configuration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/configuration.md): All configuration is provided through the builder when the SDK is assembled.
+- [Using with AI agents](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/ai-agents.md): These docs are also available in formats that AI coding assistants — Claude Code, Cursor, Codex, or ChatGPT — can read directly.
+- [Android integration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/android.md): This page covers everything Android-specific: lifecycle, payment terminal, MineSec licensing, and best practices with Jetpack Compose.
+- [iOS integration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/ios.md): On iOS, every feature works except contactless card payment.
+- [React Native integration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/react-native.md): AI POS SDK is a Kotlin library, so a React Native app accesses it through a Native Module.
+- [Product catalog](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog.md): The SDK doesn't ship any product data.
+- [Cart](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/cart.md): Cart functionality is available on AIPosSDK, PaymentClient, and OnlinePaymentClient (since 0.1.1), with the same function names.
+- [Product suggestions](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/advisor.md): Product suggestions listen to the conversation between a salesperson and a customer, then propose items from your catalog along with the reasoning.
+- [Cashier agent](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/agent.md): The cashier agent accepts commands in everyday language and runs the transaction itself: searching for products, managing the cart, processing payment, and…
+- [Card payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/card-payment.md): Card payment turns an NFC-equipped Android phone into a tap-to-pay terminal via the MineSec Headless SDK.
+- [Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment.md): Online payment charges the cart contents through a payment page opened in a WebView.
+- [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/speech-to-text.md): The SDK intentionally doesn't ship a speech-recognition engine.
+- [LLM proxy](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/llm-proxy.md): An API key bundled into an app can be extracted from the APK or IPA.
+- [Production checklist](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist.md): Go through this list before the app is installed on a real cashier device.
+- [Troubleshooting](https://dev-mobile-wknd.github.io/aipos-sdk-docs/help/troubleshooting.md): Note: the SDK's own runtime error and log messages are in Indonesian, matching its primary market.
+- [FAQ](https://dev-mobile-wknd.github.io/aipos-sdk-docs/help/faq.md): No.
+- [Changelog](https://dev-mobile-wknd.github.io/aipos-sdk-docs/help/changelog.md): All com.weekendinc.aipos: artifacts are released together at one version number.
+
+## API Reference
+
+- [API Reference](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference.md): Reference for the entire AI POS SDK version 0.1.1 public API.
+- [AIPosSDK](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-sdk.md): The single entry point for all features.
+- [AdvisorClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/advisor-client.md): Product suggestions without any other feature.
+- [PaymentClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/payment-client.md): Cart and card payment without AI features.
+- [OnlinePaymentClient](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-client.md): Cart and online payment without a terminal and without AI features.
+- [OnlinePaymentConfig](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-config.md): Package: com.weekendinc.aipos.payment.online.
+- [AiPosAndroid](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-android.md): The Android-specific integration point for the payment terminal.
+- [Data models](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/models.md): Every model is an immutable data class or sealed class.
+- [Results & errors](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/results-and-errors.md): Package com.weekendinc.aipos.domain.common.
+- [Swift bridge](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/swift-bridge.md): Some Kotlin APIs don't carry over to Swift intact.

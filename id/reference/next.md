@@ -1,0 +1,59 @@
+# Referensi API
+
+Referensi seluruh API publik AI POS SDK versi 0.1.1.
+
+## Titik masuk
+
+| Kelas | Artifact | Paket | Kegunaan |
+|---|---|---|---|
+| [`AIPosSDK`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-sdk) | `aipos-sdk` | `com.weekendinc.aipos` | Semua fitur dalam satu objek |
+| [`AdvisorClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/advisor-client) | `aipos-advisor` | `com.weekendinc.aipos.advisor` | Penyaran produk saja |
+| [`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/payment-client) | `aipos-payment` | `com.weekendinc.aipos.payment` | Keranjang + pembayaran kartu |
+| [`OnlinePaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-client) | `aipos-payment-online` | `com.weekendinc.aipos.payment.online` | Pembayaran online |
+| [`AiPosAndroid`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/aipos-android) | `aipos-payment` | `com.weekendinc.aipos` | Inisialisasi terminal di Android |
+
+## Konfigurasi dan model
+
+| Halaman | Isi |
+|---|---|
+| [`OnlinePaymentConfig`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/online-payment-config) | Semua parameter pembayaran online |
+| [Model data](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/models) | `Product`, `Money`, `Cart`, `MerchantInfo`, `PaymentState`, `WebPaymentStatus`, dan lainnya |
+| [Hasil & error](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/results-and-errors) | `PosResult`, `OnlinePaymentErrorCode`, pesan kegagalan |
+| [Jembatan Swift](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/reference/swift-bridge) | Fungsi pembantu khusus iOS |
+
+## Konvensi
+
+- **`suspend`** — panggil dari coroutine. Di Swift muncul sebagai `async throws`.
+- **`Flow<T>`** — stream nilai. Di Swift, amati lewat `FlowSubscriptionKt.subscribe`.
+- **`PosResult<T>`** — operasi yang bisa gagal tidak melempar exception; kegagalannya
+  dikembalikan sebagai `PosResult.Failure` dengan pesan yang aman ditampilkan.
+- **`IllegalArgumentException`** hanya dilempar oleh `Builder.build()` saat konfigurasi wajib
+  belum lengkap.
+
+## Import yang sering dipakai
+
+```kotlin
+import com.weekendinc.aipos.AIPosSDK
+import com.weekendinc.aipos.AiPosAndroid
+import com.weekendinc.aipos.android                         // extension Builder.android(context)
+import com.weekendinc.aipos.domain.catalog.MutableProductCatalog
+import com.weekendinc.aipos.domain.catalog.ProductCatalogSource
+import com.weekendinc.aipos.domain.common.PosResult
+import com.weekendinc.aipos.domain.entity.Cart
+import com.weekendinc.aipos.domain.entity.MerchantInfo
+import com.weekendinc.aipos.domain.entity.Product
+import com.weekendinc.aipos.domain.entity.WebPaymentStatus
+import com.weekendinc.aipos.domain.model.PaymentState
+import com.weekendinc.aipos.domain.valueobject.Money
+import com.weekendinc.aipos.domain.valueobject.ProductId
+import com.weekendinc.aipos.payment.online.AiposPaymentWebView
+import com.weekendinc.aipos.payment.online.AiposPaymentWebViewClient
+import com.weekendinc.aipos.payment.online.OnlinePaymentConfig
+import com.weekendinc.aipos.payment.online.paymentPageProbe
+```
+
+:::warning[API internal]
+Deklarasi bertanda `@InternalAiPosApi` dipakai antar-modul SDK dan bukan bagian dari API
+publik. Kompilator menolak pemakaiannya dari aplikasi Anda, dan bentuknya bisa berubah
+tanpa pemberitahuan.
+:::

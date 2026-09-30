@@ -1,0 +1,3913 @@
+# AI POS SDK
+
+> Kotlin Multiplatform SDK for point-of-sale apps on Android and iOS: cart, card payment on a MineSec terminal, online payment (VA/QRIS), AI product suggestions, and a cashier agent.
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/introduction.md -->
+
+# Introduction
+
+AI POS SDK is a Kotlin Multiplatform library that adds smart-cashier capabilities to
+your point-of-sale application. The SDK **does not ship any UI** — every screen, button,
+and design stays yours. The SDK provides the logic, data, and transaction flow.
+
+## What it can do
+
+| Capability | Example | Page |
+|---|---|---|
+| **Product suggestions** | The customer says *"I'm looking for a phone for photography, budget 15 million"* → the SDK suggests the iPhone 15 and Pixel 8 along with the reasons | [Product suggestions](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/advisor) |
+| **Cashier agent** | The cashier types *"find MacBook Air, add 1, pay"* → the agent handles all of it | [Cashier agent](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/agent) |
+| **Cart** | Add, update quantity, remove, with stock validation | [Cart](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/cart) |
+| **Card payment** | The customer taps a card on the Android phone | [Card payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/card-payment) |
+| **Online payment** | The customer pays via VA, QRIS, or card on a payment page | [Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment) |
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph APP["Your app"]
+        UI["UI<br/>(Compose / SwiftUI)"]
+        STT["Speech-to-text"]
+        DATA["Product data"]
+    end
+
+    subgraph SDK["AI POS SDK"]
+        ADV["Product suggestions"]
+        AGENT["Cashier agent"]
+        CART["Cart"]
+        PAY["Payment"]
+    end
+
+    STT -- "pushTranscript()" --> ADV
+    DATA -- "ProductCatalogSource" --> SDK
+    UI -- "sendMessage() / addToCart()" --> SDK
+    SDK -- "Flow: suggestions, cart, status" --> UI
+    PAY --> TERM["MineSec terminal"]
+    PAY --> WEB["Online payment<br/>page"]
+    ADV --> LLM["Language model<br/>(OpenAI / proxy)"]
+    AGENT --> LLM
+```
+
+Three principles worth understanding from the start:
+
+1. **Product data is yours.** The SDK doesn't have a catalog of its own. You hand over
+   your product list through [`ProductCatalogSource`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog), and the SDK
+   only reads it.
+2. **The microphone is yours.** For product suggestions, your app records audio and
+   converts it to text, then feeds the text to the SDK.
+   See [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/speech-to-text).
+3. **All state is a stream.** Cart, suggestions, and payment status are emitted as
+   Kotlin `Flow`s, so your screen just observes and redraws.
+
+## Platform support
+
+| Feature | Android | iOS |
+|---|:---:|:---:|
+| Product suggestions | ✅ | ✅ |
+| Cashier agent | ✅ | ✅ |
+| Cart & transaction history | ✅ | ✅ |
+| Contactless card payment | ✅ | ❌ |
+| Online payment (WebView) | ✅ | ✅ |
+
+:::info[Why iOS can't accept cards yet]
+CoreNFC on iPhone can only read tags, not act as an EMV terminal. Tap to Pay on
+iPhone requires the `ProximityReader` framework along with a special entitlement
+from Apple. On iOS, `processPayment()` immediately emits `PaymentState.Failed` with
+that explanation. Use [online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment) instead.
+:::
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| Android `minSdk` | 26 (Android 8.0) |
+| Android `compileSdk` | 36 |
+| JDK for building | 17 |
+| Kotlin (Kotlin Multiplatform project) | 2.3.21 or newer |
+| iOS | Targets `iosArm64`, `iosSimulatorArm64`, `iosX64` |
+| Language model key | OpenAI API key or an OpenAI-compatible proxy endpoint — only for AI features |
+| MineSec credentials | Only for real card payments |
+
+## Next steps
+
+- [Choosing artifacts](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/choosing-artifacts) — determine which modules you need.
+- [Installation](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation) — add the SDK to your Gradle project.
+- [Quick start](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/quick-start) — your first transaction in ten minutes, no hardware required.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/choosing-artifacts.md -->
+
+# Choosing an artifact
+
+The SDK is split by feature. Each artifact brings its own dependencies and permissions,
+so only add what your app actually uses.
+
+All artifacts use the group `com.weekendinc.aipos` and are released at **the same
+version** (`0.1.1`). Don't mix versions across artifacts.
+
+## Artifact list
+
+| Artifact | Contents | Entry point |
+|---|---|---|
+| `aipos-sdk` | All features in one package | [`AIPosSDK`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-sdk) |
+| `aipos-advisor` | Product suggestions from conversations | [`AdvisorClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/advisor-client) |
+| `aipos-payment` | Cart + card payment on the terminal | [`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/payment-client) |
+| `aipos-payment-online` | Online payment in a WebView | [`OnlinePaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-client) |
+| `aipos-agent` | Cashier agent | — (used via `aipos-sdk`) |
+| `aipos-llm` | Language model client | — (pulled in automatically) |
+| `aipos-core` | Data model, catalog, cart | — (pulled in automatically) |
+
+You only need to declare one artifact. The artifacts underneath it are pulled in
+transitively, and their types are directly usable from your code.
+
+## How to choose
+
+```mermaid
+flowchart TD
+    START{"Need a cashier agent<br/>via chat?"}
+    START -->|yes| SDK["aipos-sdk"]
+    START -->|no| Q2{"Need AI<br/>product suggestions?"}
+
+    Q2 -->|yes| Q3{"Also need a cart<br/>and payment?"}
+    Q2 -->|no| Q4{"Payment method?"}
+
+    Q3 -->|yes| SDK
+    Q3 -->|no| ADV["aipos-advisor"]
+
+    Q4 -->|"card on terminal"| PAY["aipos-payment"]
+    Q4 -->|"online (VA/QRIS)"| SDK
+    Q4 -->|both| SDK
+```
+
+## What's carried and what isn't
+
+| Artifact | Carried along | Not carried along |
+|---|---|---|
+| `aipos-advisor` | OpenAI client, `INTERNET` permission | MineSec, NFC permission, agent |
+| `aipos-payment` | MineSec Headless, `NFC` permission, card-tap Activity | OpenAI client, `INTERNET` permission |
+| `aipos-payment-online` | Ktor HTTP client | MineSec, NFC permission, OpenAI client, `INTERNET` permission* |
+| `aipos-sdk` | Everything above | — |
+
+\* `aipos-payment-online` needs internet but doesn't declare its own permission for it.
+Add `android.permission.INTERNET` to your app's manifest if you only use this artifact.
+
+## Using two artifacts side by side
+
+Installing `aipos-advisor` **and** `aipos-payment` together is valid — `aipos-core`
+isn't duplicated. However, each entry point has its own cart:
+
+```mermaid
+flowchart LR
+    APP["Your app"] --> ADV["AdvisorClient"]
+    APP --> PAY["PaymentClient"]
+    PAY --> CART["Cart"]
+    ADV -. "can't add to" .-> CART
+```
+
+`AdvisorClient` doesn't have a cart at all. If a suggested product needs to go
+straight into the cart being paid for, you have two choices:
+
+- Use `aipos-sdk` — one cart is shared by the advisor, agent, and payment.
+- Keep using two artifacts, and call `payment.addToCart(suggestion.product.id)`
+  yourself when the salesperson taps a suggestion card.
+
+:::tip[Recommendation]
+When in doubt, start with `aipos-sdk`. Once the features you use are clear, you can
+switch to a smaller artifact without changing your data model.
+:::
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation.md -->
+
+# Installation
+
+AI POS SDK is published on Maven with the coordinates `com.weekendinc.aipos:<artifact>:0.1.1`.
+
+## 1. Register the repository
+
+The SDK is published on **private GitHub Packages**, not Maven Central — the license is
+proprietary, not open source. Ask the AI POS SDK team for access credentials, then store
+them in your **gradle home** — not inside the project:
+
+```properties
+# ~/.gradle/gradle.properties
+GITHUB_PACKAGES_LOGIN=<GitHub username granted access>
+GITHUB_PACKAGES_TOKEN=<personal access token, scope read:packages>
+```
+
+Then register the repository in `settings.gradle.kts`, alongside `google()`:
+
+**settings.gradle.kts**
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "AIPosSDK"
+            url = uri("https://maven.pkg.github.com/dev-mobile-wknd/aipos-sdk-android")
+            credentials {
+                username = providers.gradleProperty("GITHUB_PACKAGES_LOGIN").get()
+                password = providers.gradleProperty("GITHUB_PACKAGES_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+**settings.gradle**
+
+```groovy
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "AIPosSDK"
+            url = uri("https://maven.pkg.github.com/dev-mobile-wknd/aipos-sdk-android")
+            credentials {
+                username = providers.gradleProperty("GITHUB_PACKAGES_LOGIN").get()
+                password = providers.gradleProperty("GITHUB_PACKAGES_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+:::danger[Don't commit credentials]
+Putting `GITHUB_PACKAGES_TOKEN` in the project's own `gradle.properties` makes it easy
+to accidentally commit to Git. Store it in `~/.gradle/gradle.properties`, or in your
+CI secrets as the environment variable `ORG_GRADLE_PROJECT_GITHUB_PACKAGES_TOKEN`.
+:::
+
+### MineSec repository (card payment)
+
+Skip this section if you use **neither** `aipos-payment` nor `aipos-sdk`.
+
+Both artifacts depend on the MineSec Headless SDK, which is published on **private**
+GitHub Packages. Ask MineSec support for registry credentials, then store them in your
+**gradle home** — not inside the project:
+
+```properties
+# ~/.gradle/gradle.properties
+MINESEC_REGISTRY_LOGIN=<login from MineSec>
+MINESEC_REGISTRY_TOKEN=<token from MineSec>
+```
+
+Then register the repository:
+
+**settings.gradle.kts**
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "MineSec"
+            url = uri("https://maven.pkg.github.com/theminesec/ms-registry-client")
+            credentials {
+                username = providers.gradleProperty("MINESEC_REGISTRY_LOGIN").get()
+                password = providers.gradleProperty("MINESEC_REGISTRY_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+**settings.gradle**
+
+```groovy
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            name = "MineSec"
+            url = uri("https://maven.pkg.github.com/theminesec/ms-registry-client")
+            credentials {
+                username = providers.gradleProperty("MINESEC_REGISTRY_LOGIN").get()
+                password = providers.gradleProperty("MINESEC_REGISTRY_TOKEN").get()
+            }
+        }
+    }
+}
+```
+
+:::danger[Don't commit credentials]
+Putting `MINESEC_REGISTRY_TOKEN` in the project's own `gradle.properties` makes it easy
+to accidentally commit to Git. Store it in `~/.gradle/gradle.properties`, or in your
+CI secrets as the environment variable `ORG_GRADLE_PROJECT_MINESEC_REGISTRY_TOKEN`.
+:::
+
+## 2. Add the dependency
+
+Choose the artifact that matches [your needs](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/choosing-artifacts).
+
+**build.gradle.kts**
+
+```kotlin
+dependencies {
+    // All features
+    implementation("com.weekendinc.aipos:aipos-sdk:0.1.1")
+
+    // — or only specific features —
+    // implementation("com.weekendinc.aipos:aipos-advisor:0.1.1")
+    // implementation("com.weekendinc.aipos:aipos-payment:0.1.1")
+    // implementation("com.weekendinc.aipos:aipos-payment-online:0.1.1")
+}
+```
+
+**build.gradle**
+
+```groovy
+dependencies {
+    // All features
+    implementation 'com.weekendinc.aipos:aipos-sdk:0.1.1'
+
+    // — or only specific features —
+    // implementation 'com.weekendinc.aipos:aipos-advisor:0.1.1'
+    // implementation 'com.weekendinc.aipos:aipos-payment:0.1.1'
+    // implementation 'com.weekendinc.aipos:aipos-payment-online:0.1.1'
+}
+```
+
+**gradle/libs.versions.toml**
+
+```toml
+[versions]
+aipos = "0.1.1"
+
+[libraries]
+aipos-sdk = { module = "com.weekendinc.aipos:aipos-sdk", version.ref = "aipos" }
+aipos-advisor = { module = "com.weekendinc.aipos:aipos-advisor", version.ref = "aipos" }
+aipos-payment = { module = "com.weekendinc.aipos:aipos-payment", version.ref = "aipos" }
+aipos-payment-online = { module = "com.weekendinc.aipos:aipos-payment-online", version.ref = "aipos" }
+
+# then in build.gradle.kts:
+# implementation(libs.aipos.sdk)
+```
+
+### Kotlin Multiplatform project
+
+Add the dependency in `commonMain`. Gradle automatically picks the Android or iOS
+variant.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("com.weekendinc.aipos:aipos-sdk:0.1.1")
+        }
+    }
+}
+```
+
+To expose the SDK's types to Swift, see [iOS integration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/ios).
+
+## 3. Adjust the Android configuration
+
+The SDK requires the following minimum settings in your app module:
+
+```kotlin title="app/build.gradle.kts"
+android {
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 26
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+```
+
+## 4. Check manifest permissions
+
+Some permissions are already merged in from the SDK artifacts' manifests:
+
+| Permission / component | Registered by | Do you need to add it? |
+|---|---|---|
+| `android.permission.INTERNET` | `aipos-llm` (pulled in by `aipos-sdk`, `aipos-advisor`) | Only if using `aipos-payment-online` alone |
+| `android.permission.NFC` | `aipos-payment` | No |
+| `AIPosHeadlessActivity` Activity | `aipos-payment` | No |
+| `android.permission.RECORD_AUDIO` | — | Yes, if using the microphone for product suggestions |
+
+```xml title="AndroidManifest.xml"
+<!-- Only if using aipos-payment-online without any other artifact -->
+<uses-permission android:name="android.permission.INTERNET" />
+```
+
+## 5. Verify
+
+Sync Gradle, then confirm the dependencies resolve:
+
+```bash
+./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep aipos
+```
+
+You should see `com.weekendinc.aipos:aipos-core:0.1.1` along with the artifacts
+you declared.
+
+:::tip[Next]
+Continue to [Quick start](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/quick-start) to run your first transaction.
+:::
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/quick-start.md -->
+
+# Quick start
+
+This guide takes you from an empty Android project to a successful first transaction —
+no terminal, no license, and no backend. Card payment uses the built-in simulator,
+which always approves the transaction.
+
+**What you need:** an Android project with Jetpack Compose, and the
+[SDK already installed](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation) (`aipos-sdk`). An OpenAI API key is
+optional — only needed for step 6.
+
+## 1. Prepare product data
+
+The SDK doesn't ship a catalog. Build your own product list:
+
+```kotlin
+import com.weekendinc.aipos.domain.entity.Product
+import com.weekendinc.aipos.domain.valueobject.Money
+import com.weekendinc.aipos.domain.valueobject.ProductId
+
+val storeProducts = listOf(
+    Product(
+        id = ProductId("GDG-001"),
+        name = "iPhone 15 128GB",
+        price = Money.fromRupiah(13_999_000),
+        barcode = "8991234500011",
+        category = "Smartphone",
+        stock = 12,
+        description = "48MP camera, USB-C",
+    ),
+    Product(
+        id = ProductId("GDG-002"),
+        name = "Google Pixel 8",
+        price = Money.fromRupiah(9_499_000),
+        barcode = "8991234500028",
+        category = "Smartphone",
+        stock = 5,
+        description = "Best low-light photos in its class",
+    ),
+)
+```
+
+:::warning[Prices are in whole Rupiah]
+`Money.fromRupiah(13_999_000)` means Rp 13,999,000. Don't use the `Money(...)`
+constructor for prices — that constructor takes a value in **cents**.
+:::
+
+## 2. Initialize the terminal in `Application`
+
+```kotlin
+class PosApplication : Application() {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    override fun onCreate() {
+        super.onCreate()
+        appScope.launch {
+            val result = AiPosAndroid.initPlatform(this@PosApplication)
+            Log.d("POS", result.message)
+        }
+    }
+}
+```
+
+Don't forget to register this class in the manifest: `<application android:name=".PosApplication" ...>`.
+
+## 3. Register the Activity
+
+```kotlin
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AiPosAndroid.attachActivity(this)   // REQUIRED, and must be called in onCreate
+        setContent { PosScreen() }
+    }
+}
+```
+
+## 4. Assemble the SDK
+
+Create one SDK instance per app process. A `ViewModel` is a reasonable place for a
+single-screen app:
+
+```kotlin
+class PosViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val merchant = MerchantInfo(
+        id = "merchant_001",
+        name = "Jaya Gadget Store",
+        address = "Jl. Sudirman No. 1, Jakarta",
+        terminalId = "TID001",
+        mid = "MID123456",
+    )
+
+    val sdk: AIPosSDK = AIPosSDK.Builder()
+        .llmApiKey(BuildConfig.LLM_API_KEY)
+        .merchantInfo(merchant)
+        .productCatalog(MutableProductCatalog(storeProducts))
+        .android(application)
+        .build()
+
+    val catalog = sdk.observeCatalog()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val cart = sdk.observeCart()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Cart())
+
+    val paymentStatus = sdk.observePaymentState()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PaymentState.Idle)
+
+    fun addProduct(product: Product) = viewModelScope.launch {
+        sdk.addToCart(product.id)
+            .onFailure { failure -> Log.w("POS", failure.message) }
+    }
+
+    fun pay() = viewModelScope.launch {
+        sdk.processPayment().collect()   // status also flows into paymentStatus
+    }
+
+    override fun onCleared() {
+        // close() is a suspend function; run it in a scope that won't be cancelled.
+        CoroutineScope(Dispatchers.Default).launch { sdk.close() }
+    }
+}
+```
+
+:::tip[Don't have an OpenAI API key yet?]
+`build()` refuses to run without `llmApiKey` or `llmProxyBaseUrl`. To try just the
+cart and payment, pass `llmApiKey("dummy")` — non-AI features keep working, and only
+AI calls fail when actually used. Or use
+[`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/payment-client), which doesn't need a key at all.
+:::
+
+## 5. Draw the screen
+
+```kotlin
+@Composable
+fun PosScreen(vm: PosViewModel = viewModel()) {
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val cart by vm.cart.collectAsStateWithLifecycle()
+    val status by vm.paymentStatus.collectAsStateWithLifecycle()
+
+    Column(Modifier.padding(16.dp)) {
+        catalog.forEach { product ->
+            ListItem(
+                headlineContent = { Text(product.name) },
+                supportingContent = { Text(product.price.format()) },
+                trailingContent = {
+                    Button(onClick = { vm.addProduct(product) }) { Text("Add") }
+                },
+            )
+        }
+
+        Text("Total: ${cart.total.format()}  (${cart.itemCount} items)")
+
+        Button(onClick = { vm.pay() }, enabled = !cart.isEmpty) {
+            Text("Pay")
+        }
+
+        when (val s = status) {
+            is PaymentState.WaitingTap -> Text(s.message)
+            is PaymentState.Processing -> Text(s.message)
+            is PaymentState.Success -> Text("Paid: ${s.amount.format()}")
+            is PaymentState.Failed -> Text("Failed: ${s.errorMessage}")
+            PaymentState.Idle -> Unit
+        }
+    }
+}
+```
+
+Run the app, add a product, then tap **Pay**. In the simulator, you'll see
+"[SIMULATED] Tap a card on the terminal", followed by "Processing…", then a paid
+status. The cart is cleared automatically and the transaction is saved to history.
+
+## 6. Try the AI features
+
+With a valid `LLM_API_KEY`, add these two functions to the ViewModel:
+
+```kotlin
+val suggestions = sdk.observeSuggestions()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+fun listen(text: String) = sdk.pushTranscript(text)
+
+fun chat(message: String) = viewModelScope.launch {
+    val answer = sdk.sendMessage(message)
+    Log.d("POS", answer)
+}
+```
+
+- Call `listen("looking for a phone for photography, budget 15 million")` — about a
+  second and a half later, `suggestions` fills with matching products.
+- Call `chat("add one Pixel 8")` — the agent finds the product and adds it to the
+  cart, which is immediately visible on screen.
+
+## Next
+
+- [Configuration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/configuration) — API key, merchant identity, online payment.
+- [Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/android) — real terminals, licensing, and best practices.
+- [Production checklist](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist) — before your app reaches a real cashier.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/configuration.md -->
+
+# Configuration
+
+All configuration is provided through the builder when the SDK is assembled. `build()`
+validates required configuration and throws `IllegalArgumentException` if something is
+missing — wiring mistakes surface when the app opens, not when a customer is already
+waiting at the register.
+
+## Builder summary
+
+| Method | `AIPosSDK` | `AdvisorClient` | `PaymentClient` | `OnlinePaymentClient` |
+|---|:---:|:---:|:---:|:---:|
+| `.merchantInfo(...)` | required | — | required | required |
+| `.productCatalog(...)` | required | required | required | required |
+| `.llmApiKey(...)` / `.llmProxyBaseUrl(...)` | one required | one required | — | — |
+| `.onlinePayment(...)` / `.config(...)` | optional | — | — | optional |
+| `.android(context)` / `.ios()` | required | — | required | required |
+
+## Merchant identity
+
+`MerchantInfo` is printed on the receipt and sent to the payment gateway.
+
+```kotlin
+val merchant = MerchantInfo(
+    id = "merchant_001",                     // your internal id
+    name = "Jaya Gadget Store",              // printed on the receipt
+    address = "Jl. Sudirman No. 1, Jakarta",
+    terminalId = "TID001",                   // Terminal ID from the acquirer
+    mid = "MID123456",                       // Merchant ID from the acquirer
+    profileId = "prof_xxxxxxxx",             // your MineSec profile
+)
+```
+
+| Field | Description |
+|---|---|
+| `id` | Merchant identity in your own system. |
+| `name` | Store name printed on the receipt. |
+| `address` | Store address. |
+| `terminalId` | Terminal ID (TID) from the acquirer. |
+| `mid` | Merchant ID (MID) from the acquirer. |
+| `profileId` | MineSec terminal profile from the MineSec dashboard. Defaults to `MerchantInfo.DEFAULT_PROFILE_ID`, a **test environment** profile. Production merchants must supply their own profile. |
+
+## Language model
+
+AI features (product suggestions and the cashier agent) need access to a language
+model. Choose one of two ways:
+
+**Development: direct API key**
+
+```kotlin
+AIPosSDK.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)
+    // ...
+```
+
+**Production: via a proxy**
+
+```kotlin
+AIPosSDK.Builder()
+    .llmProxyBaseUrl("https://api.tokoanda.com/llm")
+    // ...
+```
+
+| Situation | What the SDK does |
+|---|---|
+| Only `llmApiKey` is set | Calls OpenAI directly with that key. |
+| Only `llmProxyBaseUrl` is set | Calls the proxy without a key. |
+| Both are set | Calls the **proxy**, and `llmApiKey` is sent as the authentication token to the proxy. |
+| Both are empty | `build()` fails: *"Salah satu dari llmApiKey(...) atau llmProxyBaseUrl(...) wajib diisi"* (one of llmApiKey(...) or llmProxyBaseUrl(...) is required). |
+
+:::danger[An API key bundled in the app can be extracted]
+Anyone who downloads your APK can extract a key bundled inside it. Use `llmApiKey`
+only for development and demos. For production, see [LLM proxy](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/llm-proxy).
+:::
+
+:::warning[No `/v1`]
+Set `llmProxyBaseUrl` **without** a trailing `/v1`. The SDK appends
+`v1/chat/completions` itself, so `https://api.tokoanda.com/llm/v1` would produce a
+duplicated URL and end in a 404.
+:::
+
+## Product catalog
+
+Required for every entry point. See [Product catalog](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog).
+
+```kotlin
+.productCatalog(MutableProductCatalog(storeProducts))
+```
+
+## Online payment
+
+Optional. Without this call, the SDK uses the default `OnlinePaymentConfig()`, which
+points at the **beta environment** — fine for trying the flow, not for real transactions.
+
+```kotlin
+AIPosSDK.Builder()
+    .onlinePayment(
+        OnlinePaymentConfig(
+            baseUrl = "https://pay-api.tokoanda.co.id",   // without /v1
+            apiKey = BuildConfig.POS_BACKEND_API_KEY,
+            email = "cashier@tokoanda.co.id",
+            password = passwordFromSecureStorage,
+            loopbackUrlReplacement = "",                  // disable in production
+        )
+    )
+```
+
+:::warning[Always use named arguments]
+`OnlinePaymentConfig` has fifteen parameters. Calling it positionally is easy to get
+wrong without a compile error — for instance, a password landing in the email slot.
+:::
+
+Three modes you can choose from:
+
+| Mode | How to enable it | Behavior |
+|---|---|---|
+| **Prototype** | `OnlinePaymentConfig(baseUrl = "")` | No HTTP requests at all. The SDK uses a sample payment page. For building the UI. |
+| **Beta** | Don't call `.onlinePayment(...)`, or only set `apiKey` | The SDK's shared beta backend. For integration testing. |
+| **Production** | Set your own `baseUrl`, `apiKey`, `email`, `password` | Your own merchant backend. |
+
+The full parameter list is in [OnlinePaymentConfig](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-config).
+
+## Storing secrets
+
+Don't write keys directly in code. A simple pattern for Android:
+
+```properties
+# local.properties — gitignored by default
+LLM_API_KEY=sk-proj-...
+POS_BACKEND_API_KEY=...
+```
+
+```kotlin title="app/build.gradle.kts"
+import java.util.Properties
+
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
+android {
+    buildFeatures { buildConfig = true }
+    defaultConfig {
+        buildConfigField("String", "LLM_API_KEY", "\"${localProps.getProperty("LLM_API_KEY", "")}\"")
+        buildConfigField("String", "POS_BACKEND_API_KEY", "\"${localProps.getProperty("POS_BACKEND_API_KEY", "")}\"")
+    }
+}
+```
+
+This keeps keys out of Git, **but the key still ends up bundled in the APK**. For
+production, move the key to a server — see [Production checklist](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist).
+
+## Error messages from `build()`
+
+The SDK's error messages are in Indonesian, matching its primary market:
+
+| Message | Cause |
+|---|---|
+| `MerchantInfo wajib diisi — panggil merchantInfo(...)` | `.merchantInfo(...)` hasn't been called. |
+| `Sumber katalog wajib diisi — panggil productCatalog(...)` | `.productCatalog(...)` hasn't been called. |
+| `Platform belum diatur — panggil .android(context) di Android atau .ios() di iOS` | Forgot to call `.android(context)` or `.ios()`. |
+| `Salah satu dari llmApiKey(...) atau llmProxyBaseUrl(...) wajib diisi` | Both language-model paths are empty. |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/ai-agents.md -->
+
+# Using with AI agents
+
+These docs are also available in formats that AI coding assistants — Claude Code,
+Cursor, Codex, or ChatGPT — can read directly. That way the agent writes code against
+the SDK's real API instead of guessing function names.
+
+| What you need | Use |
+|---|---|
+| A coding agent that knows the SDK in every session | [Agent skill](#agent-skill) |
+| The whole documentation as context | [`llms.txt`](#llmstxt) |
+| Ask questions about a single page | [Copy page menu](#copy-page-menu) |
+
+## Agent skill
+
+`SKILL.md` is an SDK summary written for agents: choosing an artifact, installation,
+assembling the SDK, rules that prevent the most common bugs, and Swift differences.
+The agent loads it automatically when you work on code that uses `com.weekendinc.aipos`.
+
+For **Claude Code**, save it in your project's skills folder:
+
+```bash
+mkdir -p .claude/skills/aipos-sdk
+curl -fsSL https://dev-mobile-wknd.github.io/aipos-sdk-docs/skills/aipos-sdk/SKILL.md \
+  -o .claude/skills/aipos-sdk/SKILL.md
+```
+
+Commit the `.claude/skills/` folder so the whole team uses the same skill. To use it
+across all your projects, save it to `~/.claude/skills/aipos-sdk/SKILL.md` instead.
+
+For other agents that don't support skills yet, paste the file's contents into their
+instruction file — for example `AGENTS.md` or a Cursor project rule.
+
+:::warning[Download it again whenever you upgrade the SDK]
+The skill is written for a specific SDK version (currently 0.1.1). After bumping
+the SDK version, run the `curl` command above again so the agent doesn't use an old API.
+:::
+
+## llms.txt
+
+The entire documentation is available as plain Markdown following the
+[llms.txt](https://llmstxt.org) standard:
+
+| Address | Contents |
+|---|---|
+| [`/llms.txt`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/llms.txt) | Every page with a one-sentence summary |
+| [`/llms-full.txt`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/llms-full.txt) | The whole documentation in one file |
+| `<page address>.md` | A single page as Markdown, e.g. [`/guide/installation.md`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation.md) |
+
+Give the `llms.txt` address to an agent that can browse the web, then ask it to read the
+relevant pages. For agents without web access, attach `llms-full.txt` as a file.
+
+The Indonesian version lives under `/id/`, for example
+[`/id/llms.txt`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/id/llms.txt).
+
+## Copy page menu
+
+Every documentation page has a **Copy page** button at the top right of the title:
+
+| Action | Result |
+|---|---|
+| **Copy page** | Copies the page as Markdown, ready to paste into an AI chat |
+| **View as Markdown** | Opens the page's Markdown version in a new tab |
+| **Open in ChatGPT** | Opens ChatGPT with a prompt to read this page |
+| **Open in Claude** | Opens Claude with a prompt to read this page |
+
+## Tips
+
+- **Mention the SDK version** you use. All `com.weekendinc.aipos:*` artifacts must be on
+  the same version.
+- **Don't paste secrets** — `llmApiKey`, `apiKey`, or the online payment password —
+  into an AI chat. Use placeholders and keep the real values in `local.properties`.
+- **Check agent-generated payment code** against the
+  [Production checklist](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist) before releasing.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/android.md -->
+
+# Android integration
+
+This page covers everything Android-specific: lifecycle, payment terminal, MineSec
+licensing, and best practices with Jetpack Compose.
+
+## Required steps
+
+Two steps are tied to the Android lifecycle and can't be skipped if you use card
+payment (`aipos-payment` or `aipos-sdk`).
+
+### 1. `initPlatform` in `Application.onCreate`
+
+MineSec validates the license and prepares cryptographic keys before the first
+transaction. Start as early as possible:
+
+```kotlin
+class PosApplication : Application() {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private val _terminalReady = MutableStateFlow<PlatformInitResult?>(null)
+    val terminalReady: StateFlow<PlatformInitResult?> = _terminalReady.asStateFlow()
+
+    override fun onCreate() {
+        super.onCreate()
+        appScope.launch {
+            _terminalReady.value = AiPosAndroid.initPlatform(
+                application = this@PosApplication,
+                licenseName = "tokoanda.license",   // file in src/main/assets/
+            )
+        }
+    }
+}
+```
+
+`PlatformInitResult` has `success` and `message`. Show `message` to the cashier when
+`success` is `false` — for example, when the license file isn't found.
+
+### 2. `attachActivity` in `onCreate`
+
+The card-tap screen is launched via `registerForActivityResult`, which can only be
+registered before the Activity reaches the `STARTED` state:
+
+```kotlin
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AiPosAndroid.attachActivity(this)   // before setContent, not in onResume
+        setContent { PosApp() }
+    }
+}
+```
+
+Skipping this step makes `processPayment()` emit `PaymentState.Failed` with a
+message explaining why.
+
+## Real terminal vs. simulator
+
+The terminal variant is decided when the `aipos-payment` artifact is **built and
+published**:
+
+| Variant | Behavior |
+|---|---|
+| **MineSec** | The NFC phone becomes a real tap-to-pay terminal. Requires a license and `profileId`. |
+| **Simulator** | No NFC. Every transaction is approved after roughly 3 seconds. Messages start with `[SIMULATED]` and `transactionId` starts with `SIM-`. |
+
+:::danger[Make sure which variant you have]
+The same Maven coordinates can contain either variant. Before shipping to a real
+cashier, run one test transaction and confirm the message does **not** start with
+`[SIMULATED]`. The simulator never moves real money.
+:::
+
+### MineSec requirements
+
+1. **Registry credentials** — see [Installation](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation#minesec-repository-card-payment).
+2. **A license file** (`*.license`) from MineSec, placed in `app/src/main/assets/`.
+   The default name the SDK looks for is `AiPosAndroid.DEFAULT_LICENSE_NAME`
+   (`public-test.license`, a test license).
+3. **`profileId`** from the MineSec dashboard, set in [`MerchantInfo`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/configuration#merchant-identity).
+4. **A device with NFC**. Add the following declaration if your app also needs to be
+   installable on devices without NFC:
+
+```xml
+<uses-feature android:name="android.hardware.nfc" android:required="false" />
+```
+
+## Where to keep the SDK instance
+
+Create **one instance per process**. Each instance stores the cart and transaction
+history in local device storage, and two instances alive at the same time will
+overwrite each other.
+
+| Your app | Recommended place |
+|---|---|
+| A single cashier screen | That screen's `ViewModel` |
+| Several screens sharing a cart | A singleton in `Application` or your DI container (Hilt/Koin) |
+
+The SDK uses its own Koin container, so it's safe to use alongside your app's own
+Koin or Hilt.
+
+Call `close()` once the SDK is no longer needed. On `AIPosSDK`, `close()` is a
+suspend function.
+
+## Observing state with Compose
+
+All `observe*()` functions return a `Flow`. Turn it into a `StateFlow` in the
+ViewModel so the screen has an initial value right away:
+
+```kotlin
+val cart: StateFlow<Cart> = sdk.observeCart()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Cart())
+```
+
+```kotlin
+@Composable
+fun CartBar(vm: PosViewModel) {
+    val cart by vm.cart.collectAsStateWithLifecycle()
+    Text("${cart.itemCount} items · ${cart.total.format()}")
+}
+```
+
+`collectAsStateWithLifecycle` (from `androidx.lifecycle:lifecycle-runtime-compose`)
+stops observing while the app is in the background.
+
+## Calling from Java
+
+`suspend` functions and `Flow` aren't pleasant to call from Java. Wrap them on the
+Kotlin side, or use the callback provided specifically for online payment:
+
+```kotlin
+val registration = sdk.addOnlinePaymentListener { status -> /* ... */ }
+registration.cancel()   // when the screen is closed
+```
+
+## Logs
+
+The SDK writes online-payment logs with the tag `AiPos/online-payment`:
+
+```bash
+adb logcat | grep AiPos/online-payment
+```
+
+When the SDK is assembled, one log line announces the active online payment mode
+(prototype or API), the backend address, and whether the key and login are set. The
+password is never printed.
+
+## Full example
+
+The `sample-android` sample app in the SDK repository shows a complete integration:
+product grid, microphone, AI suggestion chips, cart, card payment, and online
+payment in a bottom sheet.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/ios.md -->
+
+# iOS integration
+
+On iOS, every feature works **except contactless card payment**. Product suggestions,
+the cashier agent, the cart, and online payment work fully.
+
+## Choosing an integration path
+
+A Maven artifact can only be consumed by Gradle. The path you take depends on the
+shape of your iOS app:
+
+| Your iOS app | Path |
+|---|---|
+| Already uses **Kotlin Multiplatform** (has a `shared` module) | [A. Through the shared module](#a-through-the-shared-module-kotlin-multiplatform) |
+| **Pure Swift** without Gradle | [B. Swift Package Manager](#b-swift-package-manager-for-swift-apps) |
+
+### A. Through the shared module (Kotlin Multiplatform)
+
+Add the SDK as an `api` dependency and **export** it to your iOS framework. Without
+`export`, the SDK's types aren't visible from Swift.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    listOf(iosArm64(), iosSimulatorArm64(), iosX64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "Shared"
+            isStatic = true
+            export("com.weekendinc.aipos:aipos-sdk:0.1.1")
+            export("com.weekendinc.aipos:aipos-core:0.1.1")
+            export("com.weekendinc.aipos:aipos-advisor:0.1.1")
+            export("com.weekendinc.aipos:aipos-agent:0.1.1")
+            export("com.weekendinc.aipos:aipos-payment:0.1.1")
+            export("com.weekendinc.aipos:aipos-payment-online:0.1.1")
+        }
+    }
+
+    sourceSets {
+        commonMain.dependencies {
+            api("com.weekendinc.aipos:aipos-sdk:0.1.1")
+        }
+    }
+}
+```
+
+In Swift, `import Shared` and then use the examples below. Kotlin 2.3.21 or newer is
+required for the SDK's klib to be readable.
+
+### B. Swift Package Manager for Swift apps
+
+A pure Swift app adds `AIPosSDK` via Swift Package Manager — not via Maven. Its
+binary (`AIPosSDK.xcframework`, static) is hosted in a public distribution repo
+separate from the SDK source:
+
+1. Xcode → **File → Add Package Dependencies…**
+2. Enter the URL: `https://github.com/dev-mobile-wknd/swift-aipos-sdk`
+3. Choose the version you want (following release tags, e.g. `0.1.1`)
+4. Xcode downloads the binary, verifies the checksum, and links it automatically
+
+After the package is added, set one extra build setting on the app target:
+
+```
+OTHER_LDFLAGS = $(inherited) -lc++
+```
+
+:::warning[`-lc++` is required]
+The Kotlin/Native runtime uses libc++, and it isn't carried along in a static
+framework — SwiftPM doesn't add it automatically for a binary target. Without
+`-lc++`, linking fails with `std::` symbols not found.
+:::
+
+:::info[Why a separate, public distribution repo?]
+That repo only contains `Package.swift` and the compiled binary — the Kotlin SDK
+source stays private. It's public because SwiftPM can't authenticate `binaryTarget`
+downloads from a private GitHub Release. This doesn't leak anything sensitive: the
+SDK is still useless without an `llmApiKey`, `merchantInfo`, and payment
+credentials issued through the merchant onboarding process.
+:::
+
+## Assembling the SDK from Swift
+
+```swift
+import AIPosSDK
+
+let merchant = MerchantInfo(
+    id: "merchant_001",
+    name: "Jaya Gadget Store",
+    address: "Jl. Sudirman No. 1, Jakarta",
+    terminalId: "TID001",
+    mid: "MID123456",
+    profileId: MerchantInfo.companion.DEFAULT_PROFILE_ID
+)
+
+let catalog = MutableProductCatalog(initial: [
+    IosDomainFactoryKt.productOf(
+        id: "GDG-001", name: "iPhone 15 128GB", priceRupiah: 13_999_000,
+        barcode: "8991234500011", category: "Smartphone", stock: 12,
+        description: "48MP camera, USB-C", imageUrl: ""
+    ),
+])
+
+let sdk = AIPosSDK.Builder()
+    .llmApiKey(key: apiKey)
+    .merchantInfo(info: merchant)
+    .productCatalog(source: catalog)
+    .onlinePayment(config: IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(apiKey: posApiKey))
+    .ios()
+    .build()
+```
+
+:::info[Default values don't cross over to Swift]
+Kotlin parameters that have a default value are still required from Swift. That's
+why `MerchantInfo` above writes `profileId` explicitly, and `Product` is built via
+`productOf` instead of its constructor.
+:::
+
+## Observing a `Flow` from Swift
+
+A `collect` function called from Swift **doesn't get cancelled** when the Swift
+`Task` is cancelled. Use `FlowSubscriptionKt.subscribe`, which returns a handle to
+stop it:
+
+```swift
+@MainActor
+final class PosViewModel: ObservableObject {
+    @Published var cart: Cart?
+    private var subscriptions: [FlowSubscription] = []
+
+    func start() {
+        subscriptions.append(FlowSubscriptionKt.subscribe(sdk.observeCart()) { [weak self] value in
+            guard let cart = value as? Cart else { return }
+            self?.cart = cart                   // already on the main thread
+        })
+    }
+
+    func stop() {
+        subscriptions.forEach { $0.cancel() }
+        subscriptions.removeAll()
+    }
+}
+```
+
+The value received is typed `Any?` because Kotlin generics don't carry over to
+Objective-C — downcast it yourself with `as?`.
+
+## Calling a `suspend` function
+
+Suspend functions show up as `async throws` functions in Swift:
+
+```swift
+Task {
+    do {
+        let result = try await sdk.addToCart(productId: product.id, quantity: 1)
+        if let failure = result as? PosResultFailure {
+            errorMessage = failure.message
+        }
+    } catch {
+        errorMessage = error.localizedDescription
+    }
+}
+```
+
+`PosResult` reads as `PosResultSuccess<T>` and `PosResultFailure`.
+
+## What changes shape in Swift
+
+| Kotlin | In Swift | Workaround |
+|---|---|---|
+| `Money` (price, total) | `Int64` in **cents** | `IosDomainFactoryKt.formatMoneyCents(cents:)` → `"Rp 13.999.000"` |
+| `ProductId` | `Any` | Pass `product.id` through as-is; read its text with `IosDomainFactoryKt.productIdValue(product:)` |
+| `Product` constructor | Unusable | `IosDomainFactoryKt.productOf(...)` with the price in whole Rupiah |
+| `OnlinePaymentConfig` constructor | 15 required arguments | `IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(...)` |
+| `Flow<T>` | Can't `for await` | `FlowSubscriptionKt.subscribe(flow) { }` |
+| `AiposPaymentNavigationDelegate` | `unavailable` | Write your own `WKNavigationDelegate` — see below |
+
+Details on all the bridge functions are in the [Swift bridge](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/swift-bridge).
+
+## Online payment in `WKWebView`
+
+Online payment needs three connections: a navigation delegate, KVO on `url`, and a
+*page probe*.
+
+```swift
+import WebKit
+
+final class PaymentWebViewController: UIViewController, WKNavigationDelegate {
+    private let sdk: AIPosSDK
+    private let session: WebPaymentSession
+    private var webView: WKWebView!
+    private var urlObservation: NSKeyValueObservation?
+
+    init(sdk: AIPosSDK, session: WebPaymentSession) {
+        self.sdk = sdk
+        self.session = session
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        webView = WKWebView(frame: view.bounds)
+        webView.navigationDelegate = self
+        view.addSubview(webView)
+
+        // 1. Single-page navigation happens via history.pushState, which does
+        //    not call the delegate. KVO catches it.
+        urlObservation = webView.observe(\.url) { [weak self] view, _ in
+            if let url = view.url?.absoluteString { self?.sdk.onWebViewUrlChanged(url: url) }
+        }
+
+        // 2. REQUIRED: without the probe, the status gets stuck at "choosing a method".
+        sdk.attachPaymentPageProbe(probe: IosPaymentPageProbeKt.paymentPageProbe(webView))
+
+        webView.load(URLRequest(url: URL(string: session.paymentUrl)!))
+    }
+
+    // 3. Navigation delegate
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let url = webView.url?.absoluteString { sdk.onWebViewUrlChanged(url: url) }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        sdk.onWebViewLoadFailed(reason: error.localizedDescription)
+    }
+}
+```
+
+Reporting the same URL repeatedly has no effect, so KVO and the delegate are safe
+to use together. The full flow and emitted statuses are explained in
+[Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment).
+
+## Permissions in `Info.plist`
+
+If you use the microphone for product suggestions, both of these keys are
+required. Missing either one causes the app to be force-closed when the
+microphone is turned on.
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>The microphone is used to listen to conversations with customers.</string>
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Conversations are converted to text so the AI can suggest products.</string>
+```
+
+## Card payment on iOS
+
+`processPayment()` on iOS immediately emits a single `PaymentState.Failed`
+explaining that contactless payment isn't supported. Hide the card payment button
+on iOS, and offer [online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment) instead.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/react-native.md -->
+
+# React Native integration
+
+AI POS SDK is a Kotlin library, so a React Native app accesses it through a
+**Native Module**. This guide covers the Android side.
+
+## 1. Add the dependency
+
+```kotlin title="android/app/build.gradle.kts"
+dependencies {
+    implementation("com.weekendinc.aipos:aipos-sdk:0.1.1")
+}
+```
+
+Make sure `minSdk` is at least 26 and `compileSdk` is 36 — see [Installation](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation).
+If using card payment, also register the
+[MineSec repository](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation#minesec-repository-card-payment).
+
+## 2. Initialize in `MainApplication` and `MainActivity`
+
+```kotlin title="MainApplication.kt"
+override fun onCreate() {
+    super.onCreate()
+    CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+        AiPosAndroid.initPlatform(this@MainApplication)
+    }
+    // ...other React Native initialization
+}
+```
+
+```kotlin title="MainActivity.kt"
+class MainActivity : ReactActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AiPosAndroid.attachActivity(this)
+    }
+}
+```
+
+:::warning[`attachActivity` must come from an Activity]
+A Native Module only receives `ReactApplicationContext`, which isn't a
+`ComponentActivity`. That's why `attachActivity` is called from `MainActivity`,
+not from inside the module.
+:::
+
+## 3. Create the Native Module
+
+```kotlin title="AiPosModule.kt"
+class AiPosModule(
+    private val reactContext: ReactApplicationContext,
+) : ReactContextBaseJavaModule(reactContext) {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val catalog = MutableProductCatalog()
+    private var sdk: AIPosSDK? = null
+
+    override fun getName() = "AiPos"
+
+    @ReactMethod
+    fun initialize(config: ReadableMap, promise: Promise) {
+        if (sdk != null) return promise.resolve(true)
+
+        val merchant = MerchantInfo(
+            id = config.getString("merchantId").orEmpty(),
+            name = config.getString("merchantName").orEmpty(),
+            address = config.getString("address").orEmpty(),
+            terminalId = config.getString("terminalId").orEmpty(),
+            mid = config.getString("mid").orEmpty(),
+            profileId = config.getString("profileId") ?: MerchantInfo.DEFAULT_PROFILE_ID,
+        )
+
+        val instance = runCatching {
+            AIPosSDK.Builder()
+                .llmProxyBaseUrl(config.getString("llmProxyBaseUrl").orEmpty())
+                .merchantInfo(merchant)
+                .productCatalog(catalog)
+                .android(reactContext)
+                .build()
+        }.getOrElse { return promise.reject("AIPOS_CONFIG", it) }
+
+        sdk = instance
+        scope.launch {
+            instance.observePaymentState().collect { state -> emit("AiPosPaymentState", state.toMap()) }
+        }
+        scope.launch {
+            instance.observeCart().collect { cart -> emit("AiPosCart", cart.toMap()) }
+        }
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun setProducts(products: ReadableArray) {
+        catalog.setProducts((0 until products.size()).map { i -> products.getMap(i)!!.toProduct() })
+    }
+
+    @ReactMethod
+    fun sendMessage(message: String, promise: Promise) {
+        val instance = sdk ?: return promise.reject("AIPOS_NOT_READY", "Call initialize() first")
+        scope.launch {
+            runCatching { instance.sendMessage(message) }
+                .onSuccess(promise::resolve)
+                .onFailure { promise.reject("AIPOS_ERROR", it) }
+        }
+    }
+
+    @ReactMethod
+    fun pay() {
+        val instance = sdk ?: return
+        scope.launch { instance.processPayment().collect() }
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) = Unit   // required for NativeEventEmitter
+
+    @ReactMethod
+    fun removeListeners(count: Int) = Unit
+
+    override fun invalidate() {
+        scope.cancel()
+        super.invalidate()
+    }
+
+    private fun emit(event: String, payload: WritableMap) {
+        reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit(event, payload)
+    }
+}
+```
+
+The `toMap()` and `toProduct()` mapping functions are written to match your app's
+own data shape. An example for payment status:
+
+```kotlin
+private fun PaymentState.toMap(): WritableMap = Arguments.createMap().apply {
+    putString("type", this@toMap::class.simpleName)
+    when (val s = this@toMap) {
+        is PaymentState.WaitingTap -> putString("message", s.message)
+        is PaymentState.Processing -> putString("message", s.message)
+        is PaymentState.Success -> {
+            putString("transactionId", s.transactionId)
+            putDouble("amountRupiah", s.amount.whole.toDouble())
+        }
+        is PaymentState.Failed -> putString("message", s.errorMessage)
+        PaymentState.Idle -> Unit
+    }
+}
+
+private fun ReadableMap.toProduct() = Product(
+    id = ProductId(getString("id")!!),
+    name = getString("name").orEmpty(),
+    price = Money.fromRupiah(getDouble("priceRupiah").toLong()),
+    barcode = getString("barcode").orEmpty(),
+    category = getString("category").orEmpty(),
+    stock = getInt("stock"),
+)
+```
+
+Register the module through `ReactPackage` like any other Native Module.
+
+## 4. Use it from JavaScript
+
+```javascript
+import { NativeModules, NativeEventEmitter } from 'react-native';
+
+const { AiPos } = NativeModules;
+const events = new NativeEventEmitter(AiPos);
+
+await AiPos.initialize({
+  merchantId: 'merchant_001',
+  merchantName: 'Jaya Gadget Store',
+  address: 'Jl. Sudirman No. 1',
+  terminalId: 'TID001',
+  mid: 'MID123456',
+  llmProxyBaseUrl: 'https://api.tokoanda.com/llm',
+});
+
+AiPos.setProducts([
+  { id: 'GDG-001', name: 'iPhone 15 128GB', priceRupiah: 13999000,
+    barcode: '8991234500011', category: 'Smartphone', stock: 12 },
+]);
+
+const cartSub = events.addListener('AiPosCart', (cart) => setCart(cart));
+const paySub = events.addListener('AiPosPaymentState', (state) => {
+  if (state.type === 'WaitingTap') showTapPrompt(state.message);
+});
+
+const reply = await AiPos.sendMessage('find iPhone 15, add 1');
+
+// when the screen is closed
+cartSub.remove();
+paySub.remove();
+```
+
+## Notes
+
+- Only one SDK instance per process — that's why `initialize` above ignores a
+  second call.
+- For online payment, `react-native-webview`'s `WebView` doesn't expose the
+  `evaluateJavascript` that the *page probe* needs. Render the payment page in a
+  native Activity or `ViewManager` that uses `AiposPaymentWebView` — see
+  [Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog.md -->
+
+# Product catalog
+
+The SDK **doesn't ship any product data**. Your app hands over the catalog through
+`ProductCatalogSource`, and the SDK only reads it to:
+
+- draw the product list via `observeCatalog()`,
+- search for products when the cashier agent receives a command,
+- build product suggestions — only items in the catalog may be suggested,
+- validate stock when an item is added to the cart.
+
+## The contract
+
+```kotlin
+fun interface ProductCatalogSource {
+    fun observeProducts(): Flow<List<Product>>
+}
+```
+
+It's shaped as a stream. Changes on your side — stock going down, a price going up,
+a new product — are visible to the SDK immediately, with no need to rebuild anything.
+
+## Option 1: `MutableProductCatalog`
+
+For a static catalog, or if you'd rather push data:
+
+```kotlin
+val catalog = MutableProductCatalog(initialProducts)
+
+val sdk = AIPosSDK.Builder()
+    .productCatalog(catalog)
+    // ...
+    .build()
+
+// Whenever the data changes, e.g. after syncing with the server:
+catalog.setProducts(latestProducts)
+```
+
+`setProducts` **replaces the entire contents** of the catalog, it doesn't append.
+Products missing from the new list immediately disappear from search and
+suggestions. Safe to call from any thread.
+
+## Option 2: your own implementation
+
+If your catalog is already a stream — Room, SQLDelight, or a `StateFlow` in a
+repository — connect it directly so there's no second copy that can go stale:
+
+```kotlin
+val catalog = ProductCatalogSource {
+    productDao.observeAll().map { rows -> rows.map { it.toAiposProduct() } }
+}
+
+private fun ProductEntity.toAiposProduct() = Product(
+    id = ProductId(sku),
+    name = name,
+    price = Money.fromRupiah(priceRupiah),
+    barcode = barcode.orEmpty(),
+    category = category,
+    stock = stock,
+    description = shortDescription.orEmpty(),
+    imageUrl = imageUrl.orEmpty(),
+)
+```
+
+:::warning[Two requirements for a custom implementation]
+1. **The flow must emit a first value promptly** — an empty list is fine. The SDK
+   waits for the first emission when adding an item to the cart; a flow that never
+   emits leaves the cashier waiting forever.
+2. **The flow must be cheap to collect.** The SDK re-collects it every time it needs
+   the catalog. Use a `StateFlow`, a database flow, or a cache — don't hit the
+   network on every collection.
+:::
+
+## The `Product` model
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `ProductId` | Unique identity. May not be empty. |
+| `name` | `String` | Display name. Used by the agent when searching for products. |
+| `price` | `Money` | Unit price. Create it with `Money.fromRupiah(...)`. |
+| `barcode` | `String` | Barcode (EAN-13), for lookup via a scanner. |
+| `category` | `String` | E.g. `"Smartphone"` or `"Laptop"`. |
+| `stock` | `Int` | Remaining stock. Zero means out of stock and can't be added to the cart. |
+| `description` | `String` | A one-line summary. **Strongly affects the quality of AI suggestions** — fill it with the product's selling points. |
+| `imageUrl` | `String` | Image address. The SDK never loads it; display it with your own image loader. |
+
+:::tip[A good description makes for good suggestions]
+Product suggestions match customer needs against `name`, `category`, `price`, and
+`description`. A description like *"48MP camera, 2-day battery, IP68 water
+resistance"* is far more useful than *"Nice phone"*.
+:::
+
+## Stock stays your responsibility
+
+The SDK validates requests against the `stock` number you provide, but it **never
+reduces stock**. After a transaction is paid, record the sale and update stock in
+your own system. Since the catalog is a stream, the new number is picked up by the
+SDK immediately:
+
+```kotlin
+sdk.processPayment().collect { state ->
+    if (state is PaymentState.Success) {
+        val sold = sdk.observeTransactions(limit = 1).first().first().cart
+        inventory.reduceStock(sold.items)   // your own app's code
+    }
+}
+```
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/cart.md -->
+
+# Cart
+
+Cart functionality is available on `AIPosSDK`, `PaymentClient`, and `OnlinePaymentClient`
+(since 0.1.1), with the same function names. Its contents are stored in local device
+storage, so they survive the app being closed.
+
+## Observing the cart contents
+
+```kotlin
+sdk.observeCart().collect { cart ->
+    showTotal(cart.total.format())            // "Rp 23.498.000"
+    showItemCount(cart.itemCount)             // total quantity, not the number of rows
+    cart.items.forEach { item ->
+        println("${item.product.name} x${item.quantity} = ${item.subtotal.format()}")
+    }
+}
+```
+
+## Changing the cart contents
+
+Every operation is a `suspend` function that returns `PosResult<Cart>`:
+
+```kotlin
+scope.launch {
+    when (val result = sdk.addToCart(product.id, quantity = 1)) {
+        is PosResult.Success -> Unit                        // observeCart() updates too
+        is PosResult.Failure -> showMessage(result.message)  // safe to show to the cashier
+    }
+}
+```
+
+| Operation | Function | Fails when |
+|---|---|---|
+| Add | `addToCart(productId, quantity = 1)` | Quantity ≤ 0, product not in the catalog, out of stock, or the total exceeds stock |
+| Update quantity | `updateCartQuantity(productId, quantity)` | Product not in the cart, or the quantity exceeds stock. Quantity ≤ 0 removes the row. |
+| Remove | `removeFromCart(productId)` | Product not in the cart |
+| Clear | `clearCart()` | — |
+
+The SDK's failure messages are in Indonesian and are safe to show directly to the
+cashier:
+
+- `iPhone 15 128GB sedang habis` (iPhone 15 128GB is out of stock)
+- `Stok Google Pixel 8 tidak cukup. Tersedia 5, diminta 6` (Not enough stock for Google Pixel 8. 5 available, 6 requested)
+- `Produk tidak ada di keranjang` (Product not in the cart)
+
+:::tip[A concise way to handle the result]
+```kotlin
+sdk.addToCart(product.id)
+    .onSuccess { cart -> haptic() }
+    .onFailure { failure -> snackbar(failure.message) }
+```
+:::
+
+## When the cart is cleared automatically
+
+| Event | Cart |
+|---|---|
+| Card payment `PaymentState.Success` | Cleared, after the transaction is saved to history |
+| Online payment `WebPaymentStatus.Success` | Cleared (once per order) |
+| Payment failed or cancelled | **Not** cleared — the customer can try again |
+| `resetSession()` on `AIPosSDK` | Cleared, along with the conversation and suggestions |
+
+## The `Cart` model
+
+| Property | Type | Description |
+|---|---|---|
+| `items` | `List<CartItem>` | Line items, order preserved |
+| `subtotal` | `Money` | Sum of all lines before discount |
+| `discount` | `Money` | Discount applied to the whole cart |
+| `total` | `Money` | `subtotal − discount`, never negative |
+| `itemCount` | `Int` | Total quantity across all products |
+| `isEmpty` | `Boolean` | `true` when there are no items |
+
+`CartItem` contains `product`, `quantity`, and `subtotal` (price × quantity).
+
+`Cart` is *immutable*: every change produces a new object, so it's safe to use
+directly as UI state.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/advisor.md -->
+
+# Product suggestions
+
+Product suggestions listen to the conversation between a salesperson and a customer,
+then propose items from your catalog along with the reasoning. The SDK doesn't speak,
+doesn't touch the microphone, and doesn't render anything — your app decides how to
+present the suggestions.
+
+```
+Customer: "saya cari hp buat foto-foto, budget 15 juta"
+          (looking for a phone for photography, budget 15 million)
+  → iPhone 15 128GB — 48MP camera, still under budget
+  → Google Pixel 8  — best low-light photos in its class
+```
+
+The SDK's suggestion reasoning comes back in Indonesian, matching its primary market.
+
+**Available on:** `AIPosSDK` (artifact `aipos-sdk`) and `AdvisorClient` (artifact `aipos-advisor`).
+
+## The flow
+
+```mermaid
+sequenceDiagram
+    participant Mic as Microphone (your app)
+    participant App as Your app
+    participant SDK as AI POS SDK
+    participant LLM as Language model
+
+    Mic->>App: speech fragment
+    App->>SDK: setInterimTranscript("looking for a pho...")
+    Mic->>App: sentence complete
+    App->>SDK: pushTranscript("looking for a phone for photography")
+    Note over SDK: waits for the conversation to settle, ~1.5s
+    SDK-->>App: state = Thinking
+    SDK->>LLM: transcript + catalog
+    LLM-->>SDK: needs + products
+    Note over SDK: drops products not in the catalog
+    SDK-->>App: suggestions, buyerIntent, state = Suggesting
+```
+
+## Assembling it
+
+**Suggestions only (AdvisorClient)**
+
+```kotlin
+val advisor = AdvisorClient.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)   // or .llmProxyBaseUrl(...)
+    .productCatalog(catalog)
+    .build()                              // no Context needed
+```
+
+**Alongside other features (AIPosSDK)**
+
+```kotlin
+val sdk = AIPosSDK.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .android(context)
+    .build()
+```
+
+`AdvisorClient.Builder` doesn't need a `Context`, so it can be assembled in
+`commonMain` of a Kotlin Multiplatform project.
+
+## Feeding in the conversation
+
+```kotlin
+// A sentence that is already final
+sdk.pushTranscript("looking for a phone for photography, budget 15 million")
+
+// Optional: a partial phrase still being recognized, for ghost text on screen
+sdk.setInterimTranscript("looking for a pho...")
+```
+
+`pushTranscript` is safe to call as often as you like. Analysis doesn't run per
+sentence — it runs after the conversation settles for about 1.5 seconds. To force
+analysis immediately — for example when a salesperson taps a "Suggest" button —
+call:
+
+```kotlin
+sdk.requestSuggestions()
+```
+
+The text source is up to you: on-device speech-to-text, a transcription service,
+or typing. See [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/speech-to-text) for Android and iOS
+examples.
+
+## Receiving suggestions
+
+```kotlin
+sdk.observeSuggestions().collect { suggestions ->
+    suggestions.forEach { s ->
+        showChip(
+            name = s.product.name,
+            price = s.product.price.format(),
+            reason = s.reason,           // In Indonesian, ready to read aloud to the customer
+            confidence = s.confidence,   // 0.0 – 1.0
+        )
+    }
+}
+```
+
+Suggestions are sorted from most relevant. Each `ProductSuggestion` carries the full
+`Product` object, so you can draw a card and add it to the cart directly:
+
+```kotlin
+onChipClick = { s -> scope.launch { sdk.addToCart(s.product.id) } }
+```
+
+## Other observable state
+
+| Function | Type | Purpose |
+|---|---|---|
+| `observeAdvisorState()` | `Flow<AdvisorState>` | `Idle`, `Thinking`, `Suggesting` — for an indicator on the microphone button |
+| `observeBuyerIntent()` | `Flow<String>` | A one-sentence summary of the customer's needs |
+| `observeTranscript()` | `Flow<List<String>>` | Every sentence submitted so far |
+| `observeInterimTranscript()` | `Flow<String>` | The last partial sentence |
+| `observeAdvisorError()` | `Flow<String?>` | The latest failure, `null` if none |
+
+`AdvisorState` is kept separate from the suggestion list because the UI needs to
+tell *"still thinking"* apart from *"found nothing"* — both mean an empty
+suggestion list.
+
+## Compose example
+
+```kotlin
+@Composable
+fun SuggestionsBar(vm: PosViewModel) {
+    val suggestions by vm.suggestions.collectAsStateWithLifecycle()
+    val state by vm.advisorState.collectAsStateWithLifecycle()
+    val error by vm.advisorError.collectAsStateWithLifecycle()
+
+    Column {
+        if (state is AdvisorState.Thinking) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+        suggestions.forEach { s ->
+            AssistChip(
+                onClick = { vm.addProduct(s.product) },
+                label = { Text("${s.product.name} · ${s.product.price.format()}") },
+            )
+            Text(s.reason, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+```
+
+## Ending a conversation
+
+| Function | Effect |
+|---|---|
+| `clearAdvisor()` (`AIPosSDK`) / `clear()` (`AdvisorClient`) | Clear the transcript and suggestions; the cart isn't touched |
+| `resetSession()` (`AIPosSDK`) | Clear the transcript, suggestions, agent conversation, **and** cart |
+| `close()` | Release all resources once suggestions are no longer needed |
+
+Call one of these every time the customer changes. A leftover transcript from the
+previous customer would make suggestions target someone who already left.
+
+## Guarantees and limitations
+
+- **Suggestions always come from your catalog.** Products the model mentions but
+  that aren't in the catalog are dropped before reaching your app.
+- **Requires internet** and a valid language-model key.
+- **Privacy:** the conversation transcript and catalog data are sent to the
+  language-model provider (or your proxy). Disclose this to customers per your
+  store's privacy policy.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/agent.md -->
+
+# Cashier agent
+
+The cashier agent accepts commands in everyday language and runs the transaction
+itself: searching for products, managing the cart, processing payment, and
+composing the receipt. The agent's language understanding targets Indonesian,
+matching the SDK's primary market.
+
+```
+Cashier: cari iPhone 15, tambah 1, berapa totalnya?
+         (find iPhone 15, add 1, what's the total?)
+Agent:   iPhone 15 128GB sudah masuk keranjang. Totalnya Rp 13.999.000. Lanjut bayar?
+         (iPhone 15 128GB is in the cart. Total is Rp 13,999,000. Proceed to pay?)
+Cashier: bayar (pay)
+Agent:   Silakan tempelkan kartu ke terminal...
+         (Please tap a card on the terminal...)
+Agent:   Pembayaran berhasil (VISA). Ini struknya: ...
+         (Payment successful (VISA). Here's the receipt: ...)
+```
+
+**Available on:** `AIPosSDK` (artifact `aipos-sdk`) only.
+
+## Sending a message
+
+```kotlin
+scope.launch {
+    val answer: String = sdk.sendMessage("find MacBook Air then add 1")
+    // answer comes back in Indonesian
+}
+```
+
+`sendMessage` is a `suspend` function that only returns once the agent is done —
+including after waiting for the customer to tap a card. Don't await it on the UI
+thread without an indicator; observe `observeProcessing()` to show an animation.
+
+## Displaying the conversation
+
+```kotlin
+sdk.observeMessages().collect { history ->
+    history.forEach { message ->
+        when (message) {
+            is AgentMessage.UserMessage -> rightBubble(message.content)
+            is AgentMessage.AssistantMessage -> leftBubble(message.content)
+            is AgentMessage.ToolCall -> smallNote("${message.toolName}: ${message.summary}")
+            is AgentMessage.ErrorMessage -> errorBubble(message.message)
+        }
+    }
+}
+
+sdk.observeProcessing().collect { busy -> showTypingIndicator(busy) }
+```
+
+| `AgentMessage` type | Contents |
+|---|---|
+| `UserMessage` | The message sent by the cashier (`content`) |
+| `AssistantMessage` | The agent's reply (`content`) |
+| `ToolCall` | A record that the agent ran an action (`toolName`, `summary`) — useful for audits |
+| `ErrorMessage` | A failure while processing the message (`message`) |
+
+Every type has a `timestamp` in epoch milliseconds.
+
+## Payment status while the agent is paying
+
+The agent only replies once the transaction is done. While waiting, show the tap
+instructions from `observePaymentState()`:
+
+```kotlin
+sdk.observePaymentState().collect { state ->
+    when (state) {
+        is PaymentState.WaitingTap -> showTapDialog(state.message)
+        is PaymentState.Processing -> showTapDialog(state.message)
+        else -> dismissTapDialog()
+    }
+}
+```
+
+## What the agent can do
+
+| Action | Example command |
+|---|---|
+| `search_product` — search for a product by name or barcode | *"ada Samsung S24?"* (any Samsung S24?), *"cek 8991234500011"* (check 8991234500011) |
+| `manage_cart` — add, remove, change quantity, view, clear | *"tambah 2"* (add 2), *"hapus Pixel-nya"* (remove the Pixel), *"berapa totalnya?"* (what's the total?) |
+| `process_payment` — contactless card payment | *"bayar"* (pay), *"lanjut"* (proceed) |
+| `generate_receipt` — compose a 40-character-wide text receipt | *"cetak struknya"* (print the receipt) |
+| `transaction_history` — recent transaction history | *"transaksi hari ini apa saja?"* (what transactions happened today?) |
+
+A cart changed by the agent is the same cart changed through `addToCart()` — the
+on-screen buttons and chat commands can be used interchangeably.
+
+## Built-in safeguards
+
+- **Never pays without confirmation.** The agent is required to show the total
+  first and wait for the cashier to answer *"bayar"* (pay), *"lanjut"* (proceed),
+  or *"ok"*. The payment action refuses to run without that confirmation, without
+  touching the terminal.
+- **Never invents products, prices, or stock.** Every number comes from your
+  catalog.
+- **Stock is validated** with the same rules as `addToCart()`.
+
+## Starting a new transaction
+
+```kotlin
+scope.launch { sdk.resetSession() }
+```
+
+`resetSession()` clears the conversation history, suggestions, cart, and payment
+status all at once. Call it every time the customer changes.
+
+## Limitations
+
+- Payment through the agent only supports **contactless cards** — not available on
+  iOS. Online payment is triggered from an on-screen button via
+  `startOnlinePayment()`.
+- Requires internet and a valid language-model key.
+- Every message calls the language model one or more times, incurring cost
+  according to your model provider's rates.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/card-payment.md -->
+
+# Card payment
+
+Card payment turns an NFC-equipped Android phone into a *tap-to-pay* terminal via
+the MineSec Headless SDK. The customer taps their card or phone, and the SDK
+reports every stage until the transaction finishes.
+
+**Available on:** `AIPosSDK` (`aipos-sdk`) and `PaymentClient` (`aipos-payment`). **Android only.**
+
+## Before you start
+
+- [ ] MineSec repository and credentials registered — [Installation](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation#minesec-repository-card-payment)
+- [ ] `AiPosAndroid.initPlatform(...)` called in `Application.onCreate` — [Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/android#1-initplatform-in-applicationoncreate)
+- [ ] `AiPosAndroid.attachActivity(this)` called in the Activity's `onCreate` — [Android](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/android#2-attachactivity-in-oncreate)
+- [ ] A license file exists in `src/main/assets/` and `MerchantInfo.profileId` is set
+
+## Processing a payment
+
+`processPayment()` charges **the current cart total** and returns a status stream
+until the transaction ends:
+
+```kotlin
+scope.launch {
+    sdk.processPayment().collect { state ->
+        when (state) {
+            PaymentState.Idle -> Unit
+            is PaymentState.WaitingTap -> show("${state.message} (${state.timeoutSeconds}s)")
+            is PaymentState.Processing -> show(state.message)
+            is PaymentState.Success -> showReceipt(state)
+            is PaymentState.Failed -> when {
+                state.isCancelled -> show("Payment cancelled")
+                state.isTimeout -> show("Timed out, please tap the card again")
+                else -> show("Failed: ${state.errorMessage}")
+            }
+        }
+    }
+}
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> WaitingTap: processPayment()
+    Idle --> Failed: empty cart
+    WaitingTap --> Processing: card read
+    WaitingTap --> Failed: cancelled / timed out
+    Processing --> Success: approved
+    Processing --> Failed: declined
+    Success --> [*]
+    Failed --> [*]
+```
+
+## Payment status
+
+| State | Field | Meaning |
+|---|---|---|
+| `Idle` | — | No payment in progress |
+| `WaitingTap` | `message`, `timeoutSeconds` | Terminal ready, waiting for a card tap |
+| `Processing` | `message`, `cardScheme` | Card read, being processed by the acquirer |
+| `Success` | `transactionId`, `amount`, `paymentMethod`, `cardScheme`, `rrn`, `approvalCode`, `posReference` | Approved |
+| `Failed` | `errorMessage`, `responseCode`, `isCancelled`, `isTimeout` | Failed, declined, cancelled, or timed out |
+
+`state.isTerminal` is `true` for `Success` and `Failed` — a sign the tap dialog can
+be closed.
+
+:::tip[One stream, many observers]
+Every status from `processPayment()` is also forwarded to `observePaymentState()`.
+Other parts of the UI — like a banner elsewhere on screen — can just observe
+`observePaymentState()` without also calling `processPayment()`.
+:::
+
+## After a successful payment
+
+The SDK automatically:
+
+1. Saves the `Transaction` to local history.
+2. Clears the cart.
+
+What's still your job: **reducing stock** in your own system and recording the
+sale to your backend. See [Product catalog](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog#stock-stays-your-responsibility).
+
+## Cancelling
+
+```kotlin
+scope.launch { sdk.cancelPayment() }
+```
+
+Stops a payment that's waiting for a tap and returns `observePaymentState()` to
+`Idle`. The cart isn't cleared.
+
+## Transaction history
+
+```kotlin
+sdk.observeTransactions(limit = 20).collect { transactions ->
+    transactions.forEach { t ->
+        println("${t.id} · ${t.amount.format()} · ${t.paymentMethod.displayName} · ${t.status}")
+    }
+}
+```
+
+| `Transaction` field | Description |
+|---|---|
+| `id` | Transaction id from the gateway |
+| `cart` | A copy of the cart contents at the time of the transaction |
+| `amount` | The amount processed |
+| `paymentMethod` | E.g. `Contactless(scheme = VISA, maskedPan = "**** 4242")` |
+| `status` | `APPROVED`, `DECLINED`, `CANCELLED`, `TIMEOUT`, or `PENDING` |
+| `timestamp` | Epoch milliseconds |
+| `rrn` | Retrieval Reference Number, for reconciliation with the acquirer |
+| `approvalCode` | Approval code from the card issuer |
+| `posReference` | POS-generated order reference |
+
+History is stored on the device. Send transactions to your own backend if you
+need to report or reconcile them.
+
+## Simulator
+
+If the artifact you use was built without MineSec, the SDK uses a simulator:
+
+- `WaitingTap` for 2 seconds, then `Processing` for roughly 1.2 seconds, then
+  **always** `Success`.
+- Messages start with `[SIMULATED]`, `transactionId` starts with `SIM-`, a random
+  card scheme (VISA, Mastercard, JCB), and card number `**** 4242`.
+- `initPlatform` always succeeds, noting that the simulator is in use.
+
+:::danger[The simulator never moves real money]
+Make sure the build that reaches a real cashier uses a real terminal. See
+[Android — Real terminal vs. simulator](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/android#real-terminal-vs-simulator).
+:::
+
+## Validation before charging
+
+`processPayment()` immediately emits `Failed` without touching the terminal when:
+
+| Message | Cause |
+|---|---|
+| `Keranjang masih kosong` (cart is still empty) | No items yet |
+| `Total belanja harus lebih dari Rp 0` (the purchase total must be greater than Rp 0) | A discount consumed the entire total |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment.md -->
+
+# Online payment
+
+Online payment charges the cart contents through a **payment page** opened in a
+WebView. The customer picks their own channel — Virtual Account, QRIS, or card —
+and the SDK follows the status until it's paid. The cashier screen only needs to
+provide **one** "Pay online" button.
+
+**Available on:** `AIPosSDK` (`aipos-sdk`) and `OnlinePaymentClient` (`aipos-payment-online`). Works on Android and iOS.
+
+:::info[About `OnlinePaymentClient`]
+The `aipos-payment-online` artifact provides `OnlinePaymentClient` with the same
+flow, including the cart functions (`addToCart` and friends) since 0.1.1. The
+examples on this page use `AIPosSDK`. The equivalent function names are in the
+[OnlinePaymentClient reference](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-client).
+:::
+
+## The flow
+
+```mermaid
+sequenceDiagram
+    participant Cashier as Cashier app
+    participant SDK as AI POS SDK
+    participant API as Payment backend
+    participant Web as WebView
+    participant Customer as Customer
+
+    Cashier->>SDK: startOnlinePayment()
+    SDK->>API: POST /v1/login (if needed)
+    SDK->>API: POST /v1/payment-links
+    API-->>SDK: payment page URL
+    SDK-->>Cashier: WebPaymentSession
+    Cashier->>Web: loadUrl(session.paymentUrl)
+    Cashier->>SDK: attachPaymentPageProbe(webView)
+    Customer->>Web: choose channel & pay
+    Web->>API: check status (done by the page)
+    SDK-->>Cashier: onlinePaymentStatus: ChoosingMethod → Pending → Success
+    Note over SDK: cart is cleared
+```
+
+## 1. Configuration
+
+```kotlin
+val sdk = AIPosSDK.Builder()
+    .llmApiKey(BuildConfig.LLM_API_KEY)
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .onlinePayment(
+        OnlinePaymentConfig(
+            baseUrl = "https://pay-api.tokoanda.co.id",
+            apiKey = BuildConfig.POS_BACKEND_API_KEY,
+            email = "cashier@tokoanda.co.id",
+            password = password,
+            loopbackUrlReplacement = "",
+        )
+    )
+    .android(context)
+    .build()
+```
+
+To build the UI without a backend, use prototype mode: `OnlinePaymentConfig(baseUrl = "")`.
+Every configuration option is in [OnlinePaymentConfig](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-config).
+
+### Authentication
+
+The SDK manages its own token:
+
+1. Exchanges `email` + `password` for a token via `POST {baseUrl}/v1/login`. The
+   token is kept **in memory only**.
+2. Every `POST /v1/payment-links` carries `X-API-Key: <apiKey>` (identifying the
+   device) and `Authorization: Bearer <token>` (identifying the session).
+3. If the token is rejected (401/403), the SDK logs in again and retries the
+   request once — without involving the cashier.
+
+## 2. Open a payment session
+
+```kotlin
+scope.launch {
+    when (val result = sdk.startOnlinePayment(note = "Table 4")) {
+        is PosResult.Success -> openPaymentPage(result.data)
+        is PosResult.Failure -> showMessage(result.message)
+    }
+}
+```
+
+`WebPaymentSession` contains:
+
+| Field | Description |
+|---|---|
+| `paymentUrl` | The address loaded in the WebView |
+| `amount` | The amount being charged, to show on the cashier screen |
+| `orderId` | POS-generated order reference |
+| `sessionId` | The session's identity on the provider's side |
+| `expiresAtMillis` | The session's deadline, `null` if not provided by the provider |
+
+The cart is **not yet** cleared at this stage.
+
+## 3. Show the payment page
+
+**Android (Compose)**
+
+```kotlin
+@Composable
+fun PaymentPage(sdk: AIPosSDK, session: WebPaymentSession) {
+    val context = LocalContext.current
+
+    // Create the WebView ONCE. Recreating it on every recomposition reloads the page
+    // and throws the customer back to the start.
+    val webView = remember(session.paymentUrl) {
+        AiposPaymentWebView(context).apply {
+            webViewClient = AiposPaymentWebViewClient(sdk)
+            loadUrl(session.paymentUrl)
+        }
+    }
+
+    // REQUIRED: without the probe, the status gets stuck at ChoosingMethod.
+    LaunchedEffect(webView) { sdk.attachPaymentPageProbe(webView.paymentPageProbe()) }
+
+    DisposableEffect(webView) { onDispose { webView.destroy() } }
+
+    AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
+}
+```
+
+**Android (View)**
+
+```kotlin
+val webView = AiposPaymentWebView(context)
+webView.webViewClient = AiposPaymentWebViewClient(sdk)
+webView.loadUrl(session.paymentUrl)
+
+// REQUIRED: without the probe, the status gets stuck at ChoosingMethod.
+sdk.attachPaymentPageProbe(webView.paymentPageProbe())
+```
+
+**iOS (Swift)**
+
+```swift
+webView.navigationDelegate = self   // your own WKNavigationDelegate
+urlObservation = webView.observe(\.url) { [weak self] view, _ in
+    if let url = view.url?.absoluteString { self?.sdk.onWebViewUrlChanged(url: url) }
+}
+
+// REQUIRED: without the probe, the status gets stuck at ChoosingMethod.
+sdk.attachPaymentPageProbe(probe: IosPaymentPageProbeKt.paymentPageProbe(webView))
+
+webView.load(URLRequest(url: URL(string: session.paymentUrl)!))
+```
+
+A complete `WKNavigationDelegate` example is in [iOS integration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/ios#online-payment-in-wkwebview).
+
+### Why `attachPaymentPageProbe` is required
+
+The payment page moves from choosing-a-method → waiting → paid **without changing
+its address**. Watching WebView navigation alone never sees that transition. The
+*page probe* reads the status the page itself fetches from its server, roughly
+once a second. Call it after the WebView is created, and call it again if the
+WebView is recreated.
+
+### Why `AiposPaymentWebView`
+
+- JavaScript and DOM storage are already turned on — the payment page doesn't
+  render without them.
+- The page is scaled to fit the screen width, with no horizontal scrolling.
+- Scrolling stays with the page even when the WebView is inside a
+  `ModalBottomSheet`. Without this, scrolling reads as dragging the sheet, and the
+  customer never reaches the pay button.
+
+As a consequence, swiping down over the payment page doesn't close the sheet.
+Provide a close button outside the WebView area.
+
+If you must use a plain `WebView` (full-screen, not a sheet), call
+`webView.prepareForAiposPayment()` before loading the URL.
+
+## 4. Follow the status
+
+```kotlin
+sdk.onlinePaymentStatus.collect { status ->
+    when (status) {
+        WebPaymentStatus.Idle -> Unit
+        WebPaymentStatus.ChoosingMethod -> showHint("Customer is choosing a method…")
+        is WebPaymentStatus.Pending -> showHint("Waiting for payment…")
+        is WebPaymentStatus.Success -> onDone(status.transactionId)
+        is WebPaymentStatus.Failed -> onFailed(status.rawStatus)
+        is WebPaymentStatus.Cancelled -> closePage()
+        is WebPaymentStatus.Unknown -> log("Unrecognized status: ${status.rawStatus}")
+    }
+}
+```
+
+`onlinePaymentStatus` is a `StateFlow` — it always has a value, so the screen can
+draw immediately.
+
+| Status | Meaning | `isFinal` |
+|---|---|:---:|
+| `Idle` | No session running | |
+| `ChoosingMethod` | Page open, channel not yet chosen | |
+| `Pending(transactionId)` | Channel chosen, waiting for funds | |
+| `Success(transactionId)` | The page reports funds received. The cart is cleared automatically. | ✅ |
+| `Failed(transactionId, rawStatus)` | Declined, failed, or expired | ✅ |
+| `Cancelled(transactionId)` | The cashier closed the page or the provider cancelled it | ✅ |
+| `Unknown(transactionId, rawStatus)` | A status code the SDK doesn't recognize. **Never** treated as paid. | |
+
+Once the status is `isFinal`, the WebView may be closed.
+
+### Without `Flow`
+
+For Java, Swift, or a Native Module:
+
+```kotlin
+val registration = sdk.addOnlinePaymentListener { status -> render(status) }
+// when the screen is closed — required, so the old listener doesn't react to the next transaction
+registration.cancel()
+```
+
+## 5. Closing or cancelling
+
+| Function | When | Effect on the cart |
+|---|---|---|
+| `cancelOnlinePayment()` | The cashier closes the page before paying | Not cleared |
+| `resetSession()` | Starting a new transaction | Cleared |
+
+## Verifying payment on the backend
+
+:::danger[Don't hand over goods based on `Success` alone]
+`WebPaymentStatus.Success` is read from a page running on the cashier's device.
+Anyone who controls that device could theoretically fake it. Before handing over
+goods or marking an order as paid in your system, **confirm the transaction status
+with your own backend**, which receives a direct callback from the payment
+provider.
+:::
+
+## Configuring the payment page
+
+```kotlin
+OnlinePaymentConfig(
+    // ...
+    allowedPaymentMethods = setOf(OnlinePaymentChannel.VIRTUAL_ACCOUNT, OnlinePaymentChannel.QRIS),
+    appearance = PaymentLinkAppearance(
+        logoUrl = "https://tokoanda.co.id/logo.png",
+        backgroundColor = "#0f766e",
+        buttonColor = "#134e4a",
+        textMode = PaymentLinkTextMode.LIGHT,
+    ),
+    customerData = CustomerDataPolicy(
+        email = CollectCustomerField(enabled = true, required = false),
+    ),
+    adminFee = Money.fromRupiah(2_500),
+    linkExpiry = 2.hours,
+)
+```
+
+| Setting | Default |
+|---|---|
+| `allowedPaymentMethods` | VA, QRIS, and card. Channels are shown in set order. |
+| `appearance` | The provider's default look |
+| `customerData` | Doesn't request any customer data |
+| `adminFee` | No admin fee |
+| `linkExpiry` | 24 hours |
+| `hiddenButtonLabels` | Hides the "Back to merchant" / "Kembali ke merchant" button on the success page, so the customer doesn't leave before seeing proof of payment |
+
+:::tip[Cards cost more]
+Card transaction fees are generally well above VA and QRIS. If your store doesn't
+want to absorb that cost, remove `OnlinePaymentChannel.CARD` from
+`allowedPaymentMethods`.
+:::
+
+## When a provider changes its status codes
+
+The SDK recognizes provider status codes through `PaymentStatusJsonMapping`. Its
+defaults:
+
+| Code | Status |
+|---|---|
+| `active` | `ChoosingMethod` |
+| `PNDNG`, `pending` | `Pending` |
+| `SETLD`, `settled`, `success`, `paid` | `Success` |
+| `FAILD`, `EXPRD`, `RJCTD`, `DECLN`, `failed`, `expired`, … | `Failed` |
+| `CNCLD`, `cancelled`, `canceled` | `Cancelled` |
+
+An unrecognized code falls back to `Unknown(rawStatus = ...)` and is logged.
+Register a new code without waiting for an SDK release:
+
+```kotlin
+OnlinePaymentConfig(
+    // ...
+    statusJsonMapping = PaymentStatusJsonMapping(
+        failedValues = PaymentStatusJsonMapping.DEFAULT_FAILED_VALUES + "VOIDD",
+    ),
+)
+```
+
+## Handling `startOnlinePayment` failures
+
+`PosResult.Failure.message` is safe to show to the cashier. To decide whether a
+retry makes sense, check the code:
+
+```kotlin
+val result = sdk.startOnlinePayment()
+if (result is PosResult.Failure) {
+    when (result.onlineErrorCode) {
+        OnlinePaymentErrorCode.NETWORK -> showRetryButton()
+        OnlinePaymentErrorCode.UNAUTHORIZED -> show("Device not configured. Contact admin.")
+        else -> show(result.message)
+    }
+}
+```
+
+The full code list is in [Results & errors](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/results-and-errors#onlinepaymenterrorcode).
+
+## Development modes
+
+| Mode | Configuration | Behavior |
+|---|---|---|
+| Prototype | `baseUrl = ""` | No HTTP requests. A sample payment page. |
+| Beta | `OnlinePaymentConfig(apiKey = ...)` | Shared beta backend. |
+
+Whenever `baseUrl` is set — in beta or production mode — SDK version 0.1.1
+sends a **simulated settlement** request to `POST {baseUrl}/v1/transactions/simulate-paid`
+about three seconds after the `Pending` status, so test flows can reach a paid
+state without real money. In prototype mode, no request is sent. See
+[Production checklist](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist#online-payment) for the
+implications in production.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/speech-to-text.md -->
+
+# Speech-to-text
+
+The SDK intentionally doesn't ship a speech-recognition engine. The microphone,
+permissions, and screen lifecycle are your app's territory. The app's job is just
+two things: turn speech into text, then feed it to the SDK.
+
+| Event from the recognizer | Call |
+|---|---|
+| Interim result (sentence not finished) | `sdk.setInterimTranscript(text)` |
+| Final result (sentence finished) | `sdk.pushTranscript(text)` |
+
+## Android — `SpeechRecognizer`
+
+### Manifest
+
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+<!-- Required since Android 11: without this, isRecognitionAvailable() is always false -->
+<queries>
+    <intent>
+        <action android:name="android.speech.RecognitionService" />
+    </intent>
+</queries>
+```
+
+Request the `RECORD_AUDIO` permission at runtime before you start listening.
+
+### Controller
+
+`SpeechRecognizer` stops every time one utterance finishes. For continuous
+listening, restart it in `onResults` and on a "no speech" error:
+
+```kotlin
+class ConversationListener(
+    context: Context,
+    private val sdk: AIPosSDK,
+) : RecognitionListener {
+
+    private val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+    private val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+    }
+    private var isActive = false
+
+    init { recognizer.setRecognitionListener(this) }
+
+    fun start() { isActive = true; recognizer.startListening(intent) }
+
+    fun stop() { isActive = false; recognizer.stopListening() }
+
+    fun release() { isActive = false; recognizer.destroy() }
+
+    override fun onPartialResults(partialResults: Bundle) {
+        partialResults.firstText()?.let(sdk::setInterimTranscript)
+    }
+
+    override fun onResults(results: Bundle) {
+        results.firstText()?.takeIf { it.isNotBlank() }?.let(sdk::pushTranscript)
+        sdk.setInterimTranscript("")
+        if (isActive) recognizer.startListening(intent)
+    }
+
+    override fun onError(error: Int) {
+        val canRetry = error == SpeechRecognizer.ERROR_NO_MATCH ||
+            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+        if (isActive && canRetry) recognizer.startListening(intent)
+    }
+
+    private fun Bundle.firstText(): String? =
+        getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+
+    override fun onReadyForSpeech(params: Bundle?) = Unit
+    override fun onBeginningOfSpeech() = Unit
+    override fun onRmsChanged(rmsdB: Float) = Unit
+    override fun onBufferReceived(buffer: ByteArray?) = Unit
+    override fun onEndOfSpeech() = Unit
+    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+}
+```
+
+`SpeechRecognizer` must be created and called from the main thread.
+
+## iOS — `SFSpeechRecognizer`
+
+### Info.plist
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>The microphone is used to listen to conversations with customers.</string>
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Conversations are converted to text so the AI can suggest products.</string>
+```
+
+### Determining the end of a sentence
+
+`SFSpeechAudioBufferRecognitionRequest` in *streaming* mode often **never** marks
+a result as final while audio keeps flowing. Don't wait for `isFinal`; treat a
+sentence as done after a brief pause in silence:
+
+```swift
+private var silenceTimer: Timer?
+private let silenceDelay: TimeInterval = 1.2
+
+func handle(_ result: SFSpeechRecognitionResult) {
+    let text = result.bestTranscription.formattedString
+    sdk.setInterimTranscript(text: text)
+
+    silenceTimer?.invalidate()
+    silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceDelay, repeats: false) { [weak self] _ in
+        guard let self, !text.isEmpty else { return }
+        self.sdk.pushTranscript(text: text)
+        self.sdk.setInterimTranscript(text: "")
+        self.restartRecognitionSession()   // the next result starts from an empty sentence
+    }
+}
+```
+
+Restart the recognition session after every final sentence. Without this,
+`formattedString` keeps growing and the same sentence gets submitted repeatedly.
+
+## Tips
+
+- **Use the `id-ID` locale.** The SDK's language model understands a mix of
+  Indonesian and English, but a recognizer set to another locale produces messy
+  transcripts.
+- **Submit whole sentences, not word by word.** Interim results are enough via
+  `setInterimTranscript`.
+- **No need to throttle.** The SDK waits for the conversation to settle before
+  analyzing.
+- **Stop the microphone when the screen is closed**, and call `clearAdvisor()`
+  when the customer changes.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/llm-proxy.md -->
+
+# LLM proxy
+
+An API key bundled into an app can be extracted from the APK or IPA. For
+production, store the key on your server and have the app call that server
+instead.
+
+```mermaid
+flowchart LR
+    APP["Cashier app<br/>(device token)"] -->|"POST /llm/v1/chat/completions"| PROXY["Your proxy<br/>(OpenAI key)"]
+    PROXY -->|"POST /v1/chat/completions"| OPENAI["OpenAI"]
+```
+
+## Configuring the app
+
+```kotlin
+AIPosSDK.Builder()
+    .llmProxyBaseUrl("https://api.tokoanda.com/llm")   // without /v1
+    .llmApiKey(deviceToken)                             // optional: sent to the proxy, not to OpenAI
+    // ...
+```
+
+If `llmProxyBaseUrl` is set, the SDK calls `{llmProxyBaseUrl}/v1/chat/completions`.
+`llmApiKey` — if present — is sent as an `Authorization: Bearer` token to the
+proxy, so the proxy can identify and revoke a specific device.
+
+## Proxy requirements
+
+The proxy must be **compatible with the OpenAI Chat Completions API**:
+
+- Accept `POST /v1/chat/completions` with an OpenAI-format request body.
+- Support *tool* calls (function calling) — used by the cashier agent.
+- Return responses in OpenAI format.
+- Serve the model the SDK requests: **GPT-5.4 mini** (`OpenAIModels.Chat.GPT5_4Mini`).
+  If your proxy maps to a different model, make sure that model also supports
+  *tools*.
+
+Options that already satisfy this:
+
+| Option | Notes |
+|---|---|
+| **LiteLLM** | A ready-made gateway; supports per-key quotas and multiple providers |
+| **Azure OpenAI** | Point at its OpenAI-compatible endpoint |
+| **Your own backend** | Forward the request as-is to OpenAI while attaching the key |
+
+## Minimal proxy example (Node.js)
+
+```javascript
+import express from 'express';
+
+const app = express();
+app.use(express.json({ limit: '2mb' }));
+
+app.post('/llm/v1/chat/completions', async (req, res) => {
+  const token = req.get('authorization')?.replace('Bearer ', '');
+  if (!(await isDeviceAuthorized(token))) return res.status(401).json({ error: 'unauthorized' });
+
+  const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(req.body),
+  });
+
+  res.status(upstream.status).type('application/json').send(await upstream.text());
+});
+
+app.listen(8080);
+```
+
+Add to your proxy: a per-device rate limit, usage logging, and an allowed-model
+list.
+
+## Common mistakes
+
+| Symptom | Cause |
+|---|---|
+| 404 from the proxy | `llmProxyBaseUrl` ends with `/v1`, so the path becomes `/v1/v1/chat/completions` |
+| Empty suggestions, `observeAdvisorError()` has a 401 message | The proxy rejected the device token |
+| The agent never runs an action | The proxy or the model behind it doesn't support *tools* |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist.md -->
+
+# Production checklist
+
+Go through this list before the app is installed on a real cashier device.
+
+## Key security
+
+- [ ] **No OpenAI key in the app.** Use [`llmProxyBaseUrl`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/llm-proxy).
+- [ ] **The payment backend password isn't bundled.** `OnlinePaymentConfig.password`
+      ends up bundled in the APK/IPA and can't be revoked per device. Fetch it from
+      the server when the device is activated and store it in the Android Keystore
+      / iOS Keychain.
+- [ ] **The payment `apiKey` differs per device**, so a lost device can be revoked
+      without disrupting other cashiers.
+- [ ] MineSec credentials only live in `~/.gradle/gradle.properties` or CI secrets.
+
+## Card payment
+
+- [ ] A test transaction on the release build does **not** show a `[SIMULATED]`
+      message, and `transactionId` doesn't start with `SIM-`.
+- [ ] A production MineSec license is in `src/main/assets/` and its name is passed
+      to `initPlatform`. Don't use `public-test.license`.
+- [ ] `MerchantInfo.profileId` is set to a production profile, not
+      `DEFAULT_PROFILE_ID`.
+- [ ] `terminalId` and `mid` match the data from the acquirer.
+- [ ] A failed `initPlatform` is shown to the cashier, not just logged.
+
+## Online payment
+
+- [ ] `baseUrl`, `email`, `password`, and `apiKey` point at **your production
+      backend**, not the beta default.
+- [ ] `loopbackUrlReplacement = ""` — the default redirects `localhost` addresses
+      to a prototype page.
+- [ ] **The paid status is confirmed with your backend** before goods are handed
+      over. `WebPaymentStatus.Success` is read from the cashier's device and
+      hasn't been verified by a server.
+- [ ] **The `POST /v1/transactions/simulate-paid` endpoint isn't active on your
+      production backend.** SDK version 0.1.1 calls it about three seconds
+      after the `Pending` status, for testing purposes. If that endpoint exists
+      and accepts the call, a transaction can be recorded as paid without a real
+      payment.
+- [ ] `allowedPaymentMethods` matches the channels your store actually accepts.
+- [ ] The provider's status codes for failure and expiry have been tested.
+      Unrecognized codes show up as `Unknown` — watch the `AiPos/online-payment`
+      log during the first week.
+
+## AI features
+
+- [ ] The store's privacy policy discloses that conversations are sent to a
+      language-model provider.
+- [ ] The LLM proxy has a rate limit and cost monitoring.
+- [ ] `Product.description` is filled in — suggestion quality depends heavily on
+      it.
+
+## Data and stock
+
+- [ ] Stock is reduced in your own system after a transaction is paid. The SDK
+      never reduces it.
+- [ ] Transactions are sent to your backend. History in the SDK is only stored on
+      the device.
+- [ ] `resetSession()` is called every time the customer changes.
+
+## Stability
+
+- [ ] Only one SDK instance per process.
+- [ ] `close()` is called once the SDK is no longer needed.
+- [ ] Every `PaymentListenerRegistration` and `FlowSubscription` is cancelled when
+      the screen is closed.
+- [ ] The payment WebView is created once per session (inside `remember` in
+      Compose).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/help/troubleshooting.md -->
+
+# Troubleshooting
+
+Note: the SDK's own runtime error and log messages are in Indonesian, matching
+its primary market. The tables below keep those literal messages as-is so you can
+match them against what you actually see, with the cause and fix in English.
+
+## Installation and build
+
+### `Could not find com.theminesec.sdk:headless...`
+
+The MineSec repository isn't registered, or its credentials are wrong.
+
+1. Make sure `MINESEC_REGISTRY_LOGIN` and `MINESEC_REGISTRY_TOKEN` are in
+   `~/.gradle/gradle.properties`.
+2. Make sure the block `maven { url = uri("https://maven.pkg.github.com/theminesec/ms-registry-client") }`
+   is in `settings.gradle.kts` — see [Installation](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/installation#minesec-repository-card-payment).
+3. An expired GitHub Packages token also produces this message. Ask MineSec for a
+   new token.
+
+### `Dependency ... requires compileSdk 36`
+
+Raise the app module's `compileSdk` to 36.
+
+### `Manifest merger failed: uses-sdk:minSdkVersion 24 cannot be smaller than version 26`
+
+The SDK requires `minSdk = 26`.
+
+### Crash `JNI DETECTED ERROR ... SimpleLoggerFactory`
+
+There are two SLF4J backends on the classpath: `slf4j-simple` and
+`logback-android` (brought in by MineSec). MineSec's native code requires
+logback. Find what's pulling in `slf4j-simple`:
+
+```bash
+./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep slf4j-simple
+```
+
+Then exclude it from your app:
+
+```kotlin
+configurations.configureEach {
+    exclude(group = "org.slf4j", module = "slf4j-simple")
+}
+```
+
+### Log `No SLF4J providers were found`
+
+Not an error. An app that doesn't use MineSec has no SLF4J logging backend, so
+internal logs aren't shown. Add your own backend if needed, e.g.
+`com.github.tony19:logback-android`.
+
+### iOS linking fails with `std::` symbols not found
+
+Add `-lc++` to `OTHER_LDFLAGS`. See [iOS integration](https://dev-mobile-wknd.github.io/aipos-sdk-docs/platform/ios#b-swift-package-manager-for-swift-apps).
+
+## Initialization
+
+### `IllegalArgumentException` on `build()`
+
+Read the message — each one names the builder method that hasn't been called.
+The full list is in [Results & errors](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/results-and-errors#builder).
+
+### The app hangs when adding to the cart
+
+Your `ProductCatalogSource` never emits a value. A flow must emit its first value
+promptly — see [Product catalog](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog#option-2-your-own-implementation).
+
+## Card payment
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `PaymentActivityBridge belum di-attach` (not attached) | `attachActivity` wasn't called, or was called in `onResume` | Call `AiPosAndroid.attachActivity(this)` in `onCreate`, before `setContent` |
+| Payment always succeeds within ~3 seconds, `[SIMULASI]` message | The installed artifact is the simulator variant | Use an artifact built with MineSec |
+| `Profile ID MineSec belum diatur` (MineSec profile ID not set) | `MerchantInfo.profileId` is empty | Fill it in from the MineSec dashboard |
+| `HeadlessActivity must be declared with android:launchMode=singleTask` | Your app's manifest overrides the SDK's Activity declaration | Remove `tools:replace` for `AIPosHeadlessActivity` |
+| `initPlatform` fails about the license | The license file isn't in `src/main/assets/`, or its name differs | Check the name passed to `licenseName` |
+| `Pembayaran contactless belum didukung di iOS` (contactless payment not supported on iOS) | Called on iOS | Use online payment on iOS |
+
+## Online payment
+
+Filter the logs first — many issues are visible right away:
+
+```bash
+adb logcat | grep AiPos/online-payment
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Status stuck at `ChoosingMethod` | `attachPaymentPageProbe` hasn't been called | Call `sdk.attachPaymentPageProbe(webView.paymentPageProbe())` after the WebView is created |
+| Log: *"no page response has been captured"* | The probe is attached to the wrong WebView, or the page uses a Service Worker / cross-origin iframe / WebSocket | Make sure the probe comes from the same WebView loading `paymentUrl` |
+| Payload captured but status is `Unknown(rawStatus = ...)` | The provider uses a new status code | Add the code to `statusJsonMapping` — see [Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment#when-a-provider-changes-its-status-codes) |
+| A status endpoint is visible in the network tab but ignored | Its address doesn't contain a recognized fragment | Add the fragment to `statusJsonMapping.statusUrlFragments` |
+| No request to `/v1/payment-links` | `baseUrl` is empty → prototype mode | Set `baseUrl`; the log when the SDK is assembled names the active mode |
+| *"payment login credentials not set"* | `email` or `password` is empty | Fill in both |
+| *"payment login rejected by server"* | Wrong email/password, or a wrong `baseUrl` making `/v1/login` return 404 | Check the email printed in the mode log, then the credentials |
+| *"payment access denied even after re-login"* | The token is already fresh; the issue is `apiKey` or account permissions | Check `apiKey` and the account's role on the backend |
+| Blank/white page | WebView JavaScript is off | Use `AiposPaymentWebView`, or call `prepareForAiposPayment()` |
+| Page fails to load, the address contains `localhost` | The backend returns a loopback address | Set `loopbackUrlReplacement` (beta), or fix `public_url` on the backend (production) |
+| Page reloads every time the status changes | The WebView is recreated on every recomposition | Wrap WebView creation in `remember` |
+| Page can't be scrolled inside a bottom sheet | The sheet's gesture is swallowing the touch | Use `AiposPaymentWebView` |
+| `startOnlinePayment` fails with *"Keranjang masih kosong"* (cart is still empty) despite using `OnlinePaymentClient` | The cart wasn't filled before opening the session | Call `addToCart(...)` first — available on `OnlinePaymentClient` since 0.1.1 |
+| On iOS, page navigation isn't detected | `WKWebView` doesn't call the delegate for `history.pushState` | Add KVO on `webView.url` |
+
+## AI features
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Suggestions never appear | `pushTranscript` was never called, only `setInterimTranscript` | Submit the final sentence via `pushTranscript` |
+| `observeAdvisorError()` has a 401 message | The OpenAI key or proxy token is wrong | Check `llmApiKey` / the proxy |
+| 404 from the proxy | `llmProxyBaseUrl` ends with `/v1` | Remove `/v1` |
+| Suggestions are always empty despite a matching product existing | The model named a product that isn't an exact catalog match, so it was dropped | Fill in the product's `name` and `description` more completely |
+| Suggestions target the previous customer | The old transcript wasn't cleared | Call `clearAdvisor()` or `resetSession()` when the customer changes |
+| On iOS, suggestions are never analyzed | The recognizer never produces a final result | Determine sentence end with a silence delay — see [Speech-to-text](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/speech-to-text#determining-the-end-of-a-sentence) |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/help/faq.md -->
+
+# FAQ
+
+## General
+
+### Does the SDK provide ready-made UI?
+
+No. The SDK only provides logic, data, and the transaction flow. All UI belongs to
+your app, so the design can match your store's brand.
+
+### Do I have to use every feature?
+
+No. Choose the artifact that matches your needs — see [Choosing an artifact](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/choosing-artifacts).
+
+### Can the SDK run without internet?
+
+Cart and card payment don't need internet on the SDK's side (the MineSec terminal
+has its own network requirements). Product suggestions, the cashier agent, and
+online payment need internet.
+
+### Does the SDK conflict with Koin or Hilt in my app?
+
+No. The SDK uses its own Koin container, not a global `startKoin`.
+
+## Data
+
+### Where is cart and transaction data stored?
+
+In local device storage (`SharedPreferences` on Android, `NSUserDefaults` on
+iOS). The cart survives the app being closed. The SDK never sends transactions
+to any server — send them to your own backend yourself if needed.
+
+### Does the SDK reduce stock after a transaction?
+
+No. The SDK only validates against the `stock` number you provide. See
+[Product catalog](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/catalog#stock-stays-your-responsibility).
+
+### What currency is supported?
+
+Rupiah. `Money.format()` produces `"Rp 25,000"`, and online payment only accepts
+whole-Rupiah amounts.
+
+## AI features
+
+### What language model is used?
+
+OpenAI GPT-5.4 mini, either directly through the OpenAI API or a compatible
+proxy.
+
+### What data is sent to the language-model provider?
+
+For product suggestions: the conversation transcript and catalog data (name,
+category, price, description, stock). For the cashier agent: the cashier's
+messages, product search results, and cart contents. No payment card data is
+ever sent.
+
+### What language is understood?
+
+Indonesian, including the Indonesian–English mix common in stores. Replies and
+suggestion reasoning are written in Indonesian.
+
+### Does the SDK record audio?
+
+No. The SDK never accesses the microphone. Your app records audio and converts
+it to text.
+
+## Payment
+
+### Which cards does the terminal accept?
+
+Visa, Mastercard, American Express, JCB, Maestro, and UnionPay — depending on the
+acquiring configuration in your MineSec profile.
+
+### Can an iPhone accept card payment?
+
+Not yet. See [Introduction](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guide/introduction#platform-support). Use online
+payment on iOS instead.
+
+### How do I try payment without real money?
+
+- **Card:** the simulator variant approves every transaction.
+- **Online:** prototype mode (`baseUrl = ""`) or the built-in beta environment.
+
+### Why do I have to verify online payment with a backend?
+
+The paid status is read from the payment page on the cashier's device, not from
+a server. See [Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment#verifying-payment-on-the-backend).
+
+### Can the cashier choose the channel (VA or QRIS) before the page opens?
+
+No need. The customer chooses it themselves on the payment page. You can only
+restrict which channels are available via `allowedPaymentMethods`.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/help/changelog.md -->
+
+# Changelog
+
+All `com.weekendinc.aipos:*` artifacts are released together at one version number.
+
+## 0.1.1
+
+### Features
+
+- **`OnlinePaymentClient` has its own cart functions** — `observeCatalog`, `observeCart`,
+  `addToCart`, `removeFromCart`, `updateCartQuantity`, `clearCart`. The API matches
+  `PaymentClient`, so `aipos-payment-online` now works standalone without `AIPosSDK`.
+
+## 0.1.0
+
+First release.
+
+### Features
+
+- **Product suggestions** — `AdvisorClient` and `AIPosSDK.pushTranscript` / `observeSuggestions`.
+- **Cashier agent** — `AIPosSDK.sendMessage` with actions for product search, cart,
+  card payment, receipts, and transaction history.
+- **Cart** with stock validation and local storage.
+- **Contactless card payment** on Android via MineSec Headless SDK 1.3, with a
+  built-in simulator.
+- **Online payment** — Virtual Account, QRIS, and card through a payment page in a
+  WebView, with automatic status reading (`attachPaymentPageProbe`), automatic
+  token login, and configurable status-code mapping.
+- **Kotlin Multiplatform** — Android and iOS (`iosArm64`, `iosSimulatorArm64`,
+  `iosX64`), with Swift bridge functions.
+
+### Known limitations
+
+- Contactless card payment isn't supported on iOS yet.
+- `OnlinePaymentClient` doesn't provide cart functionality yet; use `AIPosSDK` for
+  online payment. *(Resolved in 0.1.1.)*
+- The online payment paid status isn't verified with a server by the SDK.
+- The SDK calls `POST /v1/transactions/simulate-paid` about three seconds after
+  the `Pending` status when `baseUrl` is set.
+- Provider status codes for failure, expiry, and cancellation haven't been
+  verified in the field; unrecognized codes show up as `WebPaymentStatus.Unknown`.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference.md -->
+
+# API Reference
+
+Reference for the entire AI POS SDK version 0.1.1 public API.
+
+## Entry points
+
+| Class | Artifact | Package | Purpose |
+|---|---|---|---|
+| [`AIPosSDK`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-sdk) | `aipos-sdk` | `com.weekendinc.aipos` | All features in one object |
+| [`AdvisorClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/advisor-client) | `aipos-advisor` | `com.weekendinc.aipos.advisor` | Product suggestions only |
+| [`PaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/payment-client) | `aipos-payment` | `com.weekendinc.aipos.payment` | Cart + card payment |
+| [`OnlinePaymentClient`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-client) | `aipos-payment-online` | `com.weekendinc.aipos.payment.online` | Online payment |
+| [`AiPosAndroid`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-android) | `aipos-payment` | `com.weekendinc.aipos` | Terminal initialization on Android |
+
+## Configuration and models
+
+| Page | Contents |
+|---|---|
+| [`OnlinePaymentConfig`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-config) | All online payment parameters |
+| [Data models](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/models) | `Product`, `Money`, `Cart`, `MerchantInfo`, `PaymentState`, `WebPaymentStatus`, and others |
+| [Results & errors](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/results-and-errors) | `PosResult`, `OnlinePaymentErrorCode`, failure messages |
+| [Swift bridge](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/swift-bridge) | iOS-specific helper functions |
+
+## Conventions
+
+- **`suspend`** — call it from a coroutine. In Swift it shows up as `async throws`.
+- **`Flow<T>`** — a stream of values. In Swift, observe it via
+  `FlowSubscriptionKt.subscribe`.
+- **`PosResult<T>`** — an operation that can fail doesn't throw an exception; its
+  failure is returned as `PosResult.Failure` with a message that's safe to
+  display.
+- **`IllegalArgumentException`** is only thrown by `Builder.build()` when required
+  configuration is missing.
+
+## Common imports
+
+```kotlin
+import com.weekendinc.aipos.AIPosSDK
+import com.weekendinc.aipos.AiPosAndroid
+import com.weekendinc.aipos.android                         // Builder.android(context) extension
+import com.weekendinc.aipos.domain.catalog.MutableProductCatalog
+import com.weekendinc.aipos.domain.catalog.ProductCatalogSource
+import com.weekendinc.aipos.domain.common.PosResult
+import com.weekendinc.aipos.domain.entity.Cart
+import com.weekendinc.aipos.domain.entity.MerchantInfo
+import com.weekendinc.aipos.domain.entity.Product
+import com.weekendinc.aipos.domain.entity.WebPaymentStatus
+import com.weekendinc.aipos.domain.model.PaymentState
+import com.weekendinc.aipos.domain.valueobject.Money
+import com.weekendinc.aipos.domain.valueobject.ProductId
+import com.weekendinc.aipos.payment.online.AiposPaymentWebView
+import com.weekendinc.aipos.payment.online.AiposPaymentWebViewClient
+import com.weekendinc.aipos.payment.online.OnlinePaymentConfig
+import com.weekendinc.aipos.payment.online.paymentPageProbe
+```
+
+:::warning[Internal API]
+Declarations marked `@InternalAiPosApi` are used between SDK modules and aren't
+part of the public API. The compiler refuses to let your app use them, and their
+shape can change without notice.
+:::
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-sdk.md -->
+
+# AIPosSDK
+
+```kotlin
+class AIPosSDK : WebPaymentUrlListener
+```
+
+The single entry point for all features. Artifact: `com.weekendinc.aipos:aipos-sdk`.
+
+## Builder
+
+```kotlin
+val sdk = AIPosSDK.Builder()
+    .llmApiKey(key)                 // or .llmProxyBaseUrl(url)
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .onlinePayment(config)          // optional
+    .android(context)               // or .ios()
+    .build()
+```
+
+| Method | Required | Description |
+|---|---|---|
+| `llmApiKey(key: String)` | one of | Direct OpenAI key. For development. If a proxy is also set, this is sent as a token to the proxy. |
+| `llmProxyBaseUrl(url: String)` | one of | An OpenAI-compatible endpoint, **without** `/v1`. Takes priority if both are set. |
+| `merchantInfo(info: MerchantInfo)` | yes | Merchant identity. |
+| `productCatalog(source: ProductCatalogSource)` | yes | Product catalog source. |
+| `onlinePayment(config: OnlinePaymentConfig)` | no | Default: `OnlinePaymentConfig()` (beta environment). |
+| `android(context: Context)` | yes (Android) | Extension in `com.weekendinc.aipos`. |
+| `ios()` | yes (iOS) | Extension in `com.weekendinc.aipos`. |
+| `build(): AIPosSDK` | — | Throws `IllegalArgumentException` if required configuration is incomplete. |
+
+## Catalog
+
+| Member | Type | Description |
+|---|---|---|
+| `observeCatalog()` | `Flow<List<Product>>` | The catalog contents from `productCatalog(...)`. |
+
+## Product suggestions
+
+| Member | Type | Description |
+|---|---|---|
+| `pushTranscript(text: String)` | `Unit` | Submit one final sentence. Safe to call as often as you like. |
+| `setInterimTranscript(text: String)` | `Unit` | A partial sentence still being recognized. |
+| `requestSuggestions()` | `Unit` | Analyze now, without waiting for the conversation to settle. |
+| `clearAdvisor()` | `Unit` | Clear the transcript and suggestions. The cart isn't touched. |
+| `observeSuggestions()` | `Flow<List<ProductSuggestion>>` | Latest suggestions, sorted from most relevant. |
+| `observeBuyerIntent()` | `Flow<String>` | A summary of the customer's needs. |
+| `observeAdvisorState()` | `Flow<AdvisorState>` | `Idle`, `Thinking`, `Suggesting`. |
+| `observeTranscript()` | `Flow<List<String>>` | Every sentence submitted so far. |
+| `observeInterimTranscript()` | `Flow<String>` | The last partial sentence. |
+| `observeAdvisorError()` | `Flow<String?>` | The latest failure; `null` if none. |
+
+## Cashier agent
+
+| Member | Type | Description |
+|---|---|---|
+| `suspend sendMessage(message: String)` | `String` | Send a command; returns once the agent is done. |
+| `observeMessages()` | `Flow<List<AgentMessage>>` | The conversation history. |
+| `observeProcessing()` | `Flow<Boolean>` | `true` while the agent is processing a message. |
+
+## Cart
+
+| Member | Type | Description |
+|---|---|---|
+| `observeCart()` | `Flow<Cart>` | The cart contents. |
+| `suspend addToCart(productId: ProductId, quantity: Int = 1)` | `PosResult<Cart>` | Add with stock validation. |
+| `suspend updateCartQuantity(productId: ProductId, quantity: Int)` | `PosResult<Cart>` | Quantity ≤ 0 removes the row. |
+| `suspend removeFromCart(productId: ProductId)` | `PosResult<Cart>` | Remove the row. |
+| `suspend clearCart()` | `Unit` | Clear the cart. |
+
+## Card payment
+
+| Member | Type | Description |
+|---|---|---|
+| `processPayment()` | `Flow<PaymentState>` | Charge the cart total. The stream ends at `Success` or `Failed`. |
+| `suspend cancelPayment()` | `Unit` | Cancel a payment waiting for a tap. |
+| `observePaymentState()` | `Flow<PaymentState>` | The current status, including payments run by the agent. |
+| `observeTransactions(limit: Int = 20)` | `Flow<List<Transaction>>` | Transaction history on the device. |
+
+## Online payment
+
+| Member | Type | Description |
+|---|---|---|
+| `onlinePaymentStatus` | `StateFlow<WebPaymentStatus>` | The status of the running session; `Idle` if there isn't one. |
+| `suspend startOnlinePayment(note: String? = null)` | `PosResult<WebPaymentSession>` | Open a session for the cart contents. |
+| `attachPaymentPageProbe(probe: PaymentPageProbe)` | `Unit` | **Required.** Attach the WebView loading the payment page. |
+| `onWebViewUrlChanged(url: String)` | `Unit` | Report the WebView's URL. Already done by `AiposPaymentWebViewClient`. |
+| `onWebViewLoadFailed(reason: String)` | `Unit` | Report that the page failed to load. |
+| `addOnlinePaymentListener(onStatus: PaymentStatusListener)` | `PaymentListenerRegistration` | A callback alternative to `Flow`. Cancel with `cancel()`. |
+| `cancelOnlinePayment()` | `Unit` | Cancel the session. The cart isn't cleared. |
+
+## Lifecycle
+
+| Member | Type | Description |
+|---|---|---|
+| `suspend resetSession()` | `Unit` | Clear the conversation, suggestions, cart, payment status, and online session. |
+| `suspend close()` | `Unit` | Release all resources. The instance must not be used afterward. |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/advisor-client.md -->
+
+# AdvisorClient
+
+```kotlin
+class AdvisorClient
+```
+
+Product suggestions without any other feature. Artifact: `com.weekendinc.aipos:aipos-advisor`.
+Package: `com.weekendinc.aipos.advisor`.
+
+Doesn't bring in MineSec, the NFC permission, or the cashier agent. Has no cart.
+
+## Builder
+
+```kotlin
+val advisor = AdvisorClient.Builder()
+    .llmApiKey(key)            // or .llmProxyBaseUrl(url)
+    .productCatalog(catalog)
+    .build()
+```
+
+| Method | Required | Description |
+|---|---|---|
+| `llmApiKey(key: String)` | one of | Direct OpenAI key. |
+| `llmProxyBaseUrl(url: String)` | one of | An OpenAI-compatible endpoint, without `/v1`. |
+| `productCatalog(source: ProductCatalogSource)` | yes | Only products here may be suggested. |
+| `build(): AdvisorClient` | — | Doesn't need a `Context` or a platform. |
+
+## Members
+
+| Member | Type | Description |
+|---|---|---|
+| `pushTranscript(text: String)` | `Unit` | Submit one final sentence. |
+| `setInterimTranscript(text: String)` | `Unit` | A partial sentence still being recognized. |
+| `requestSuggestions()` | `Unit` | Analyze now. |
+| `observeSuggestions()` | `Flow<List<ProductSuggestion>>` | Latest suggestions. |
+| `observeBuyerIntent()` | `Flow<String>` | A summary of the customer's needs. |
+| `observeAdvisorState()` | `Flow<AdvisorState>` | `Idle`, `Thinking`, `Suggesting`. |
+| `observeTranscript()` | `Flow<List<String>>` | Every sentence submitted so far. |
+| `observeInterimTranscript()` | `Flow<String>` | The last partial sentence. |
+| `observeAdvisorError()` | `Flow<String?>` | The latest failure. |
+| `observeCatalog()` | `Flow<List<Product>>` | The catalog contents. |
+| `clear()` | `Unit` | Clear the transcript and suggestions. |
+| `close()` | `Unit` | Release resources. Not a `suspend` function. |
+
+See the full guide at [Product suggestions](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/advisor).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/payment-client.md -->
+
+# PaymentClient
+
+```kotlin
+class PaymentClient
+```
+
+Cart and card payment without AI features. Artifact: `com.weekendinc.aipos:aipos-payment`.
+Package: `com.weekendinc.aipos.payment`.
+
+Doesn't bring in an OpenAI client or the internet permission.
+
+## Builder
+
+```kotlin
+val payment = PaymentClient.Builder()
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .android(context)          // or .ios()
+    .build()
+```
+
+| Method | Required | Description |
+|---|---|---|
+| `merchantInfo(info: MerchantInfo)` | yes | Merchant identity. |
+| `productCatalog(source: ProductCatalogSource)` | yes | Cart stock is validated against this catalog. |
+| `android(context: Context)` | yes (Android) | Extension in `com.weekendinc.aipos.payment`. |
+| `ios()` | yes (iOS) | Extension in `com.weekendinc.aipos.payment`. Card payment isn't supported on iOS. |
+| `build(): PaymentClient` | — | Throws `IllegalArgumentException` if required configuration is incomplete. |
+
+On Android, [`AiPosAndroid.initPlatform`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-android) and
+`AiPosAndroid.attachActivity` are still required.
+
+## Members
+
+| Member | Type | Description |
+|---|---|---|
+| `observeCatalog()` | `Flow<List<Product>>` | The catalog contents. |
+| `observeCart()` | `Flow<Cart>` | The cart contents. |
+| `suspend addToCart(productId: ProductId, quantity: Int = 1)` | `PosResult<Cart>` | Add with stock validation. |
+| `suspend updateCartQuantity(productId: ProductId, quantity: Int)` | `PosResult<Cart>` | Quantity ≤ 0 removes the row. |
+| `suspend removeFromCart(productId: ProductId)` | `PosResult<Cart>` | Remove the row. |
+| `suspend clearCart()` | `Unit` | Clear the cart. |
+| `processPayment()` | `Flow<PaymentState>` | Charge the cart total. |
+| `suspend cancelPayment()` | `Unit` | Cancel a payment waiting for a tap. |
+| `observePaymentState()` | `Flow<PaymentState>` | The current payment status. |
+| `observeTransactions(limit: Int = 20)` | `Flow<List<Transaction>>` | Transaction history. |
+| `close()` | `Unit` | Release resources. |
+
+See the full guide at [Card payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/card-payment).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-client.md -->
+
+# OnlinePaymentClient
+
+```kotlin
+class OnlinePaymentClient : WebPaymentUrlListener
+```
+
+Cart and online payment without a terminal and without AI features. Artifact:
+`com.weekendinc.aipos:aipos-payment-online`. Package: `com.weekendinc.aipos.payment.online`.
+
+## Builder
+
+```kotlin
+val online = OnlinePaymentClient.Builder()
+    .merchantInfo(merchant)
+    .productCatalog(catalog)
+    .config(OnlinePaymentConfig(apiKey = key))   // optional
+    .android(context)                             // or .ios()
+    .build()
+```
+
+| Method | Required | Description |
+|---|---|---|
+| `merchantInfo(info: MerchantInfo)` | yes | Merchant identity. |
+| `productCatalog(source: ProductCatalogSource)` | yes | The price and stock being charged. |
+| `config(config: OnlinePaymentConfig)` | no | Default: `OnlinePaymentConfig()` (beta environment). |
+| `android(context: Context)` | yes (Android) | Extension in `com.weekendinc.aipos.payment.online`. |
+| `ios()` | yes (iOS) | Extension in `com.weekendinc.aipos.payment.online`. |
+| `build(): OnlinePaymentClient` | — | Throws `IllegalArgumentException` if required configuration is incomplete. |
+
+## Members
+
+| Member | Equivalent on `AIPosSDK` | Type |
+|---|---|---|
+| `observeCatalog()` | same | `Flow<List<Product>>` |
+| `observeCart()` | same | `Flow<Cart>` |
+| `suspend addToCart(productId: ProductId, quantity: Int = 1)` | same | `PosResult<Cart>` — stock-validated |
+| `suspend updateCartQuantity(productId: ProductId, quantity: Int)` | same | `PosResult<Cart>` — quantity ≤ 0 removes the row |
+| `suspend removeFromCart(productId: ProductId)` | same | `PosResult<Cart>` |
+| `suspend clearCart()` | same | `Unit` |
+| `status` | `onlinePaymentStatus` | `StateFlow<WebPaymentStatus>` |
+| `suspend startSession(note: String? = null)` | `startOnlinePayment(note)` | `PosResult<WebPaymentSession>` |
+| `attachPaymentPageProbe(probe: PaymentPageProbe)` | same | `Unit` |
+| `onWebViewUrlChanged(url: String)` | same | `Unit` |
+| `onWebViewLoadFailed(reason: String)` | same | `Unit` |
+| `addStatusListener(onStatus: PaymentStatusListener)` | `addOnlinePaymentListener(onStatus)` | `PaymentListenerRegistration` |
+| `cancelSession()` | `cancelOnlinePayment()` | `Unit` |
+| `resetSession()` | — | `Unit` — returns to `Idle`; the cart isn't touched |
+| `close()` | `close()` | `Unit` |
+
+## WebView adapters
+
+| Declaration | Platform | Description |
+|---|---|---|
+| `AiposPaymentWebView(context)` | Android | A pre-configured `WebView` that stays scrollable inside a bottom sheet |
+| `AiposPaymentWebViewClient(listener: WebPaymentUrlListener)` | Android | Forwards URL changes and load failures to the SDK |
+| `WebView.prepareForAiposPayment()` | Android | Turns on JavaScript, DOM storage, and viewport adjustments on a plain `WebView` |
+| `WebView.paymentPageProbe(): PaymentPageProbe` | Android | The probe for `attachPaymentPageProbe` |
+| `WKWebView.paymentPageProbe(): PaymentPageProbe` | iOS | In Swift: `IosPaymentPageProbeKt.paymentPageProbe(webView)` |
+| `AiposPaymentNavigationDelegate(listener)` | iOS (Kotlin only) | Can't be used from Swift — write your own `WKNavigationDelegate` |
+
+See the full guide at [Online payment](https://dev-mobile-wknd.github.io/aipos-sdk-docs/features/online-payment).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/online-payment-config.md -->
+
+# OnlinePaymentConfig
+
+```kotlin
+data class OnlinePaymentConfig(...)
+```
+
+Package: `com.weekendinc.aipos.payment.online`. Passed to
+`AIPosSDK.Builder.onlinePayment(...)` or `OnlinePaymentClient.Builder.config(...)`.
+
+Every parameter has a default value. Always use **named arguments**.
+
+## Connection and authentication
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `baseUrl` | `String` | `DEFAULT_BASE_URL` (beta backend) | The API address without a trailing `/` and without `/v1`. **An empty string = prototype mode** (no HTTP). |
+| `apiKey` | `String` | `""` | The device key, sent as the `X-API-Key` header. The only one without a meaningful default. |
+| `email` | `String` | `DEFAULT_EMAIL` (beta account) | The account exchanged for a token via `POST {baseUrl}/v1/login`. |
+| `password` | `String` | `DEFAULT_PASSWORD` (beta account) | Paired with `email`. Ends up bundled in the app — see [Production checklist](https://dev-mobile-wknd.github.io/aipos-sdk-docs/guides/production-checklist#key-security). |
+| `requestTimeoutMillis` | `Long` | `10_000` | The timeout for a single HTTP request. |
+| `loopbackUrlReplacement` | `String` | `DEFAULT_LOOPBACK_URL_REPLACEMENT` (prototype page) | The scheme+host used to replace a `localhost` address the API returns. **Set to `""` in production.** |
+
+## Billing
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `linkExpiry` | `kotlin.time.Duration` | `24.hours` | How long the payment link lives from creation. |
+| `adminFee` | `Money` | `Money.ZERO` | An admin fee on top of the item price. Zero means it isn't sent. |
+| `allowedPaymentMethods` | `Set<OnlinePaymentChannel>` | `OnlinePaymentChannel.DEFAULT` (VA, QRIS, card) | The channels the customer may choose, shown in that order. |
+
+## Page appearance
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `appearance` | `PaymentLinkAppearance` | empty | The page's logo and colors. Empty fields aren't sent. |
+| `customerData` | `CustomerDataPolicy` | all off | Customer data requested on the page. |
+| `hiddenButtonLabels` | `List<String>` | `["back to merchant", "kembali ke merchant"]` | Buttons/links whose text **contains** one of these (case-insensitive) are hidden. An empty list turns the feature off. |
+
+### `PaymentLinkAppearance`
+
+| Field | Type | Example |
+|---|---|---|
+| `logoUrl` | `String` | `"https://tokoanda.co.id/logo.png"` — must be publicly reachable |
+| `backgroundColor` | `String` | `"#9e086c"` |
+| `buttonColor` | `String` | `"#273395"` |
+| `textMode` | `PaymentLinkTextMode?` | `LIGHT`, `DARK`, or `null` (provider default) |
+
+### `CustomerDataPolicy`
+
+Contains `name`, `email`, `phone`, and `address`, each typed
+`CollectCustomerField(enabled: Boolean = false, required: Boolean = false)`.
+
+```kotlin
+customerData = CustomerDataPolicy(
+    email = CollectCustomerField(enabled = true, required = true),
+)
+```
+
+## Status monitoring
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `statusJsonMapping` | `PaymentStatusJsonMapping` | current provider codes | How to interpret the page's status response. |
+| `pagePollIntervalMillis` | `Long` | `1_000` | The interval between payment-page reads. |
+| `captureWarningDelayMillis` | `Long` | `15_000` | After this long with no response captured at all, the SDK writes a warning to the log. |
+
+### `PaymentStatusJsonMapping`
+
+| Field | Default |
+|---|---|
+| `statusFieldNames` | `status`, `transaction_status`, `payment_status`, `state` |
+| `transactionIdFieldNames` | `transaction`, `transaction_id`, `transactionId`, `id` |
+| `choosingMethodValues` | `active` |
+| `pendingValues` | `PNDNG`, `pending` |
+| `successValues` | `SETLD`, `settled`, `success`, `paid` |
+| `failedValues` | `FAILD`, `EXPRD`, `RJCTD`, `DECLN`, `failed`, `failure`, `error`, `rejected`, `expired` |
+| `cancelledValues` | `CNCLD`, `cancelled`, `canceled` |
+| `statusUrlFragments` | `payment-link`, `transaction` |
+| `methodFieldNames`, `vaNumberFieldNames`, `channelValues` | Used for simulated settlement only |
+
+Every default value is available as a `DEFAULT_*` constant on the companion
+object, so you can extend it without retyping the rest:
+
+```kotlin
+PaymentStatusJsonMapping(
+    successValues = PaymentStatusJsonMapping.DEFAULT_SUCCESS_VALUES + "CMPLT",
+)
+```
+
+Value matching is case-insensitive.
+
+## Derived properties
+
+| Property | Description |
+|---|---|
+| `isSimulated` | `true` when `baseUrl` is empty (prototype mode). |
+| `hasLoginCredentials` | `true` when both `email` and `password` are set. |
+
+## Production example
+
+```kotlin
+OnlinePaymentConfig(
+    baseUrl = "https://pay-api.tokoanda.co.id",
+    apiKey = deviceKey,
+    email = account.email,
+    password = account.password,
+    loopbackUrlReplacement = "",
+    allowedPaymentMethods = setOf(OnlinePaymentChannel.VIRTUAL_ACCOUNT, OnlinePaymentChannel.QRIS),
+    appearance = PaymentLinkAppearance(logoUrl = "https://tokoanda.co.id/logo.png"),
+)
+```
+
+From Swift, use [`onlinePaymentConfigOf`](https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/swift-bridge#onlinepaymentconfigof).
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/aipos-android.md -->
+
+# AiPosAndroid
+
+```kotlin
+object AiPosAndroid
+```
+
+The Android-specific integration point for the payment terminal. Package:
+`com.weekendinc.aipos`. Artifact: `aipos-payment` (pulled in by `aipos-sdk`).
+
+## `initPlatform`
+
+```kotlin
+suspend fun initPlatform(
+    application: Application,
+    licenseName: String = DEFAULT_LICENSE_NAME,
+): PlatformInitResult
+```
+
+Prepares the payment terminal. Call it from `Application.onCreate`, before the
+first transaction.
+
+| Parameter | Description |
+|---|---|
+| `application` | Your app's `Application` instance. |
+| `licenseName` | The MineSec license file's name in `src/main/assets/`. |
+
+**Returns** `PlatformInitResult(success: Boolean, message: String)`. On the
+simulator variant, always `success = true`, noting that the simulator is in use.
+
+## `attachActivity`
+
+```kotlin
+fun attachActivity(activity: ComponentActivity)
+```
+
+Registers the Activity that shows the card-tap screen. **Required**, must be
+called in `onCreate`, before the Activity reaches the `STARTED` state.
+
+## Constants
+
+| Constant | Value | Description |
+|---|---|---|
+| `DEFAULT_LICENSE_NAME` | `"public-test.license"` | A test-environment license, paired with `MerchantInfo.DEFAULT_PROFILE_ID`. |
+
+## What gets merged into the manifest
+
+```xml
+<uses-permission android:name="android.permission.NFC" />
+
+<activity
+    android:name="com.weekendinc.aipos.payment.AIPosHeadlessActivity"
+    android:exported="false"
+    android:launchMode="singleTask"
+    android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+```
+
+Don't change `launchMode` via `tools:replace` — MineSec rejects transactions if
+this Activity isn't `singleTask`.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/models.md -->
+
+# Data models
+
+Every model is an *immutable* `data class` or `sealed class`.
+
+## Base values
+
+### `Money`
+
+Package `com.weekendinc.aipos.domain.valueobject`. Money is stored as an integer
+in **cents** (1/100 Rupiah) to avoid rounding errors.
+
+| Member | Description |
+|---|---|
+| `Money.fromRupiah(amount: Long)` | Create from whole Rupiah. `fromRupiah(25_000)` = Rp 25,000. |
+| `Money(cents: Long)` | Create from cents. `Money(2_500_000)` = Rp 25,000. |
+| `Money.ZERO` | Zero. |
+| `cents` | The value in cents. |
+| `whole` | The value in whole Rupiah. |
+| `format()` | `"Rp 25.000"`. Also used by `toString()`. |
+| `isNotPositive` | `true` when zero or negative. |
+| `+`, `-`, `* Int`, `compareTo` | Arithmetic and comparison operations. |
+
+### `ProductId`
+
+Package `com.weekendinc.aipos.domain.valueobject`. Wraps a `String`; may not be
+empty.
+
+```kotlin
+val id = ProductId("GDG-001")
+id.value   // "GDG-001"
+```
+
+## Catalog and cart
+
+Package `com.weekendinc.aipos.domain.entity`.
+
+### `Product`
+
+| Field | Type | Default |
+|---|---|---|
+| `id` | `ProductId` | — |
+| `name` | `String` | — |
+| `price` | `Money` | — |
+| `barcode` | `String` | — |
+| `category` | `String` | — |
+| `stock` | `Int` | — |
+| `description` | `String` | `""` |
+| `imageUrl` | `String` | `""` |
+| `isAvailable` | `Boolean` (derived) | `stock > 0` |
+
+### `Cart`
+
+| Member | Type |
+|---|---|
+| `items` | `List<CartItem>` |
+| `discount` | `Money` |
+| `subtotal` | `Money` |
+| `total` | `Money` — never negative |
+| `itemCount` | `Int` — total quantity |
+| `isEmpty` | `Boolean` |
+| `findItem(productId)` | `CartItem?` |
+
+### `CartItem`
+
+`product: Product`, `quantity: Int` (at least 1), `subtotal: Money`.
+
+### `MerchantInfo`
+
+| Field | Type | Default |
+|---|---|---|
+| `id` | `String` | — |
+| `name` | `String` | — |
+| `address` | `String` | — |
+| `terminalId` | `String` | — |
+| `mid` | `String` | — |
+| `profileId` | `String` | `MerchantInfo.DEFAULT_PROFILE_ID` (test profile) |
+
+## Product suggestions
+
+Package `com.weekendinc.aipos.advisor`.
+
+### `ProductSuggestion`
+
+| Field | Type | Description |
+|---|---|---|
+| `product` | `Product` | The full product from the catalog |
+| `reason` | `String` | The reasoning, in Indonesian |
+| `confidence` | `Double` | 0.0 – 1.0 |
+
+### `AdvisorState`
+
+A `sealed class` with three objects: `Idle`, `Thinking`, `Suggesting`.
+
+## Cashier agent
+
+### `AgentMessage`
+
+Package `com.weekendinc.aipos.agent.model`. Every subtype has a
+`timestamp: Long`.
+
+| Subtype | Field |
+|---|---|
+| `UserMessage` | `content: String` |
+| `AssistantMessage` | `content: String` |
+| `ToolCall` | `toolName: String`, `summary: String` |
+| `ErrorMessage` | `message: String` |
+
+## Card payment
+
+### `PaymentState`
+
+Package `com.weekendinc.aipos.domain.model`.
+
+| Subtype | Field |
+|---|---|
+| `Idle` | — |
+| `WaitingTap` | `message: String`, `timeoutSeconds: Int` |
+| `Processing` | `message: String`, `cardScheme: CardScheme` |
+| `Success` | `transactionId: String`, `amount: Money`, `paymentMethod: PaymentMethod`, `cardScheme: CardScheme`, `rrn: String?`, `approvalCode: String?`, `posReference: String?` |
+| `Failed` | `errorMessage: String`, `responseCode: String?`, `isCancelled: Boolean`, `isTimeout: Boolean` |
+
+`isTerminal: Boolean` — `true` for `Success` and `Failed`.
+
+### `Transaction`
+
+Package `com.weekendinc.aipos.domain.entity`.
+
+| Field | Type |
+|---|---|
+| `id` | `String` |
+| `cart` | `Cart` |
+| `amount` | `Money` |
+| `paymentMethod` | `PaymentMethod` |
+| `status` | `TransactionStatus` |
+| `timestamp` | `Long` |
+| `rrn` | `String?` |
+| `approvalCode` | `String?` |
+| `posReference` | `String?` |
+| `isApproved` | `Boolean` (derived) |
+
+### `TransactionStatus`
+
+`PENDING`, `APPROVED`, `DECLINED`, `CANCELLED`, `TIMEOUT`.
+
+### `PaymentMethod`
+
+| Subtype | Field | `displayName` |
+|---|---|---|
+| `Contactless` | `scheme: CardScheme`, `maskedPan: String?` | `"VISA **** 4242"` |
+| `QRCode` | `issuer: String = "QRIS"` | `"QRIS"` |
+| `Cash` | — | `"TUNAI"` (Indonesian for "cash") |
+
+### `CardScheme`
+
+`VISA`, `MASTERCARD`, `AMEX`, `JCB`, `MAESTRO`, `UNIONPAY`, `UNKNOWN`.
+
+## Online payment
+
+Package `com.weekendinc.aipos.domain.entity`.
+
+### `WebPaymentSession`
+
+| Field | Type |
+|---|---|
+| `sessionId` | `String` |
+| `orderId` | `String` |
+| `paymentUrl` | `String` |
+| `amount` | `Money` |
+| `expiresAtMillis` | `Long?` |
+
+### `WebPaymentStatus`
+
+Every subtype has a `transactionId: String?`.
+
+| Subtype | Extra field | `isFinal` |
+|---|---|:---:|
+| `Idle` | — | |
+| `ChoosingMethod` | — | |
+| `Pending` | — | |
+| `Success` | — | ✅ |
+| `Failed` | `rawStatus: String?` | ✅ |
+| `Cancelled` | — | ✅ |
+| `Unknown` | `rawStatus: String` | |
+
+### `OnlinePaymentChannel`
+
+| Value | `code` |
+|---|---|
+| `VIRTUAL_ACCOUNT` | `"VA"` |
+| `QRIS` | `"QR"` |
+| `CARD` | `"CARD"` |
+
+`OnlinePaymentChannel.ALL` and `OnlinePaymentChannel.DEFAULT` — both contain all
+three channels as of version 0.1.1.
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/results-and-errors.md -->
+
+# Results & errors
+
+## `PosResult`
+
+```kotlin
+sealed class PosResult<out T> {
+    data class Success<out T>(val data: T) : PosResult<T>()
+    data class Failure(val message: String, val cause: Throwable? = null) : PosResult<Nothing>()
+}
+```
+
+Package `com.weekendinc.aipos.domain.common`. Operations that can fail return a
+`PosResult` instead of throwing an exception, so the chance of failure is visible
+in the signature.
+
+| Member | Description |
+|---|---|
+| `isSuccess` | `true` when `Success`. |
+| `getOrNull()` | The data on success, `null` on failure. |
+| `map { }` | Transform the success data; a failure is passed through unchanged. |
+| `onSuccess { data -> }` | Runs on success. Returns the same result. |
+| `onFailure { failure -> }` | Runs on failure. Returns the same result. |
+
+`Failure.message` is **safe to display** to the cashier. `Failure.cause` holds
+technical detail.
+
+```kotlin
+sdk.addToCart(id)
+    .onSuccess { cart -> updateBadge(cart.itemCount) }
+    .onFailure { failure ->
+        snackbar(failure.message)
+        Log.w("POS", "addToCart failed", failure.cause)
+    }
+```
+
+## `OnlinePaymentErrorCode`
+
+Package `com.weekendinc.aipos.domain.error`. Available on online-payment
+failures via the `PosResult.Failure.onlineErrorCode` extension (`null` for other
+causes).
+
+| Code | Meaning | Retryable? |
+|---|---|:---:|
+| `NETWORK` | Network down or backend unreachable | ✅ |
+| `UNAUTHORIZED` | Credentials empty or rejected, even after an automatic re-login | ❌ fix the configuration |
+| `INVALID_REQUEST` | Request data didn't pass backend validation | ❌ |
+| `DUPLICATE_ORDER` | `orderId` was already used for a different charge | ❌ |
+| `EXPIRED` | The charge passed its deadline | start a new session |
+| `PROVIDER_ERROR` | The payment provider declined or had an issue | ✅ later |
+| `UNKNOWN` | Unrecognized cause | — |
+
+```kotlin
+import com.weekendinc.aipos.domain.error.OnlinePaymentErrorCode
+import com.weekendinc.aipos.domain.error.onlineErrorCode
+
+val result = sdk.startOnlinePayment()
+if (result is PosResult.Failure && result.onlineErrorCode == OnlinePaymentErrorCode.NETWORK) {
+    showRetryButton()
+}
+```
+
+## Common failure messages
+
+The SDK's failure messages are in Indonesian, matching its primary market.
+
+### Cart
+
+| Message | From |
+|---|---|
+| `Jumlah harus lebih dari 0` (quantity must be greater than 0) | `addToCart` |
+| `Produk dengan id '<id>' tidak ditemukan` (product with id `<id>` not found) | `addToCart` |
+| `<name> sedang habis` (`<name>` is out of stock) | `addToCart` |
+| `Stok <name> tidak cukup. Tersedia <n>, diminta <m>` (not enough stock for `<name>`. `<n>` available, `<m>` requested) | `addToCart`, `updateCartQuantity` |
+| `Produk tidak ada di keranjang` (product not in the cart) | `updateCartQuantity`, `removeFromCart` |
+
+### Payment
+
+| Message | From |
+|---|---|
+| `Keranjang masih kosong` (cart is still empty) | `processPayment` (as `PaymentState.Failed`), `startOnlinePayment` |
+| `Total belanja harus lebih dari Rp 0` (the purchase total must be greater than Rp 0) | `processPayment`, `startOnlinePayment` |
+| `Total belanja harus dalam Rupiah bulat` (the purchase total must be a whole Rupiah amount) | `startOnlinePayment` |
+| `Pembayaran contactless belum didukung di iOS...` (contactless payment isn't supported on iOS yet...) | `processPayment` on iOS |
+
+### Builder
+
+| Message | Cause |
+|---|---|
+| `MerchantInfo wajib diisi — panggil merchantInfo(...)` (MerchantInfo is required — call merchantInfo(...)) | `merchantInfo` hasn't been called |
+| `Sumber katalog wajib diisi — panggil productCatalog(...)` (a catalog source is required — call productCatalog(...)) | `productCatalog` hasn't been called |
+| `Platform belum diatur — panggil .android(context) di Android atau .ios() di iOS` (platform not set — call .android(context) on Android or .ios() on iOS) | The platform hasn't been set |
+| `Salah satu dari llmApiKey(...) atau llmProxyBaseUrl(...) wajib diisi` (one of llmApiKey(...) or llmProxyBaseUrl(...) is required) | Both language-model paths are empty |
+
+---
+
+<!-- Source: https://dev-mobile-wknd.github.io/aipos-sdk-docs/reference/swift-bridge.md -->
+
+# Swift bridge
+
+Some Kotlin APIs don't carry over to Swift intact. The SDK provides helper
+functions in its iOS source set to close those gaps. Swift class names follow
+their Kotlin file name (`FileNameKt`).
+
+## `FlowSubscriptionKt.subscribe`
+
+```swift
+func subscribe(_ flow: Kotlinx_coroutines_coreFlow, onEach: @escaping (Any?) -> Void) -> FlowSubscription
+```
+
+Observe a `Flow` from Swift. Every value is delivered **on the main thread**.
+
+```swift
+let subscription = FlowSubscriptionKt.subscribe(sdk.observeCart()) { value in
+    guard let cart = value as? Cart else { return }
+    self.cart = cart
+}
+subscription.cancel()   // required when the screen is closed
+```
+
+`FlowSubscription` has `isActive: Bool` and `cancel()` (safe to call more than
+once).
+
+## `IosDomainFactoryKt`
+
+### `productOf`
+
+```swift
+IosDomainFactoryKt.productOf(
+    id: String, name: String, priceRupiah: Int64,
+    barcode: String, category: String, stock: Int32,
+    description: String, imageUrl: String
+) -> Product
+```
+
+Builds a `Product` from plain types. The price is in **whole Rupiah**.
+
+### `formatMoneyCents`
+
+```swift
+IosDomainFactoryKt.formatMoneyCents(cents: Int64) -> String
+```
+
+Formats a money value from properties like `cart.total` or `product.price`
+(typed `Int64` in cents) into `"Rp 13.999.000"`.
+
+### `productIdValue`
+
+```swift
+IosDomainFactoryKt.productIdValue(product: Product) -> String
+```
+
+Reads a product's id as a `String` — for example, for `Identifiable` in
+SwiftUI. To call `addToCart(productId:)`, pass `product.id` through as-is.
+
+## `IosOnlinePaymentConfigFactoryKt`
+
+### `onlinePaymentConfigOf`
+
+```swift
+// Device key only; everything else uses the SDK default (beta environment)
+IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(apiKey: String) -> OnlinePaymentConfig
+
+// Full
+IosOnlinePaymentConfigFactoryKt.onlinePaymentConfigOf(
+    baseUrl: String, apiKey: String, email: String, password: String,
+    loopbackUrlReplacement: String
+) -> OnlinePaymentConfig
+```
+
+Other parameters (`linkExpiry`, `appearance`, and so on) use their default
+values. To change them, assemble `OnlinePaymentConfig` on the Kotlin side.
+
+## `IosPaymentPageProbeKt`
+
+### `paymentPageProbe`
+
+```swift
+IosPaymentPageProbeKt.paymentPageProbe(_ webView: WKWebView) -> PaymentPageProbe
+```
+
+The probe for `sdk.attachPaymentPageProbe(probe:)`. Required for the online
+payment status to move.
+
+## Types that change shape
+
+| Kotlin | Swift |
+|---|---|
+| `Money` | `Int64` (cents) |
+| `ProductId` | `Any` |
+| `Flow<T>` | `Kotlinx_coroutines_coreFlow` — value is `Any?` |
+| `PosResult.Success<T>` | `PosResultSuccess<T>` — data in `.data` |
+| `PosResult.Failure` | `PosResultFailure` — message in `.message` |
+| A `sealed class` object (`AdvisorState.Idle`) | A class initialized as `AdvisorState.Idle()`; compare with `is` |
+| A companion constant (`MerchantInfo.DEFAULT_PROFILE_ID`) | `MerchantInfo.companion.DEFAULT_PROFILE_ID` |
+| A `suspend` function | `async throws` |
+| A parameter with a default value | Required |
